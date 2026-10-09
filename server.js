@@ -9,6 +9,8 @@ const users = require('./lib/users')
 const issues = require('./lib/issues')
 const ai = require('./lib/ai')
 const mailer = require('./lib/mailer')
+const sso = require('./lib/sso')
+const tenants = require('./lib/tenants')
 const { setSession, clearSession, sessionMiddleware } = require('./lib/session')
 
 if (!config.sessionSecret || config.sessionSecret.length < 32) {
@@ -73,10 +75,12 @@ const failures = new Map()
 const LOGIN_WINDOW_MS = 15 * 60 * 1000
 const LOGIN_MAX_FAILURES = 8
 
-function loginBlocked(key) {
+const SSO_MAX_FAILURES = 30 // per IP; several users may share an office IP
+
+function loginBlocked(key, max = LOGIN_MAX_FAILURES) {
   const entry = failures.get(key)
   if (!entry || entry.until < Date.now()) { failures.delete(key); return false }
-  return entry.count >= LOGIN_MAX_FAILURES
+  return entry.count >= max
 }
 
 function loginFailed(key) {
@@ -142,6 +146,39 @@ app.post('/api/login', (req, res) => {
   failures.delete(key)
   setSession(res, user)
   res.json({ user: users.publicUser(user) })
+})
+
+// SSO from an ESSTRAPIS instance: /sso?tenant=<tenant>&token=<encrypted token>
+const ssoFailedPage = `<!doctype html><html lang="ca"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Accés no vàlid</title><link rel="stylesheet" href="/style.css"><main><section class="card narrow"><h1>Enllaç d'accés no vàlid</h1><p class="muted">L'enllaç ha caducat o ja s'ha fet servir. Torna-hi des d'ESSTRAPIS o entra amb el teu usuari.</p><p><a href="/">Ves a l'inici</a></p></section></main></html>`
+
+app.get('/sso', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store')
+  res.setHeader('Referrer-Policy', 'no-referrer')
+  const fail = (reason) => {
+    console.warn(`[sso] rejected (${req.ip}, tenant ${String(req.query.tenant).slice(0, 64)}): ${reason}`)
+    loginFailed(`sso|${req.ip}`)
+    res.status(401).type('html').send(ssoFailedPage)
+  }
+  if (loginBlocked(`sso|${req.ip}`, SSO_MAX_FAILURES)) return res.status(429).type('html').send(ssoFailedPage)
+  const tenantName = String(req.query.tenant || '')
+  const tenant = sso.TENANT_RE.test(tenantName) && tenants.find(tenantName)
+  if (!tenant) return fail('unknown tenant')
+  let payload
+  try {
+    payload = sso.readToken({ tenant: tenant.tenant, apiKey: tenant.apiKey, token: req.query.token })
+    if (!sso.consumeNonce(payload.nonce, payload.exp)) throw new Error('token already used')
+  } catch (err) {
+    return fail(err.message)
+  }
+  let user
+  try {
+    user = users.ssoLogin({ email: payload.email, name: payload.name, tenant: tenant.tenant })
+  } catch (err) {
+    return fail(err.message)
+  }
+  setSession(res, user)
+  // Redirect so the token leaves the address bar and history.
+  res.redirect(303, '/#/')
 })
 
 app.post('/api/logout', (req, res) => {

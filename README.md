@@ -15,6 +15,7 @@ data/
   issues/001-add-excel-export-to-partners.md
   uploads/001/<random>.png
   users.json            # scrypt password hashes, mode 600
+  tenants.json          # ESSTRAPIS instances and their SSO API keys, mode 600
 ```
 
 ## Run locally
@@ -40,6 +41,39 @@ npm run user -- role <username> admin
 npm run user -- disable <username>
 npm run user -- list
 ```
+
+## Login from ESSTRAPIS (SSO)
+
+An ESSTRAPIS instance can send its logged-in users straight to the tickets site, with no password. Each instance is a **tenant** with its own secret API key:
+
+```bash
+npm run tenant -- add coop-a "Coop A"     # prints the API key: set it in that instance (e.g. TICKETS_SSO_KEY)
+npm run tenant -- list | rotate <tenant> | disable <tenant> | enable <tenant>
+npm run tenant -- token <tenant> <email> ["<Full name>"] [ttlSeconds]   # test login URL
+```
+
+The instance builds a link `https://tiquets.esstrapis.org/sso?tenant=<tenant>&token=<token>`. The token is `{ email, name, exp, nonce }` encrypted with AES-256-GCM, using a key derived from the API key and the tenant name. The API key itself never travels. On a valid token, the site creates the user if it doesn't exist (role `user`, linked to the tenant), logs them in, and redirects to the ticket list. Their tickets record `tenant:` in the frontmatter.
+
+Rules: tokens live at most 10 minutes and work once. An existing user can only come in through the tenant that created them. Admins and users created with a password (no tenant) must log in with their password, so an instance can't take over those accounts.
+
+Code for the ESSTRAPIS side (Node, no dependencies):
+
+```js
+const crypto = require('crypto')
+
+function ticketsLoginUrl({ tenant, apiKey, email, name }) {
+  const key = Buffer.from(crypto.hkdfSync('sha256', Buffer.from(apiKey, 'utf8'), 'esstrapis-tickets-sso', tenant, 32))
+  const payload = { email, name, exp: Math.floor(Date.now() / 1000) + 300, nonce: crypto.randomBytes(16).toString('base64url') }
+  const iv = crypto.randomBytes(12)
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv)
+  cipher.setAAD(Buffer.from(tenant, 'utf8'))
+  const enc = Buffer.concat([cipher.update(JSON.stringify(payload), 'utf8'), cipher.final()])
+  const token = Buffer.concat([iv, enc, cipher.getAuthTag()]).toString('base64url')
+  return `https://tiquets.esstrapis.org/sso?tenant=${encodeURIComponent(tenant)}&token=${token}`
+}
+```
+
+Build the URL on the server, when the user clicks the link (e.g. an endpoint that responds with a redirect). Never put the API key in front-end code.
 
 ## Security
 

@@ -328,4 +328,47 @@ describe('tickets app', () => {
       mailer.setTransport(null)
     }
   })
+
+  test('SSO from an ESSTRAPIS instance creates the user and logs them in, once', async () => {
+    const tenants = require('../lib/tenants')
+    const sso = require('../lib/sso')
+    const coop = tenants.add('coop-a', 'Coop A')
+    const other = tenants.add('coop-b', 'Coop B')
+    const ssoGet = (tenant, token) => fetch(`${base}/sso?tenant=${tenant}&token=${token}`, { redirect: 'manual' })
+    const tokenFor = (t, email, extra = {}) => sso.createToken({ tenant: t.tenant, apiKey: t.apiKey, email, name: 'Núria', ...extra })
+
+    const token = tokenFor(coop, 'Nuria@Coop-A.cat')
+    const res = await ssoGet('coop-a', token)
+    assert.strictEqual(res.status, 303)
+    assert.strictEqual(res.headers.get('location'), '/#/')
+    const cookie = res.headers.get('set-cookie').split(';')[0]
+    const { user } = await (await call(cookie, '/me')).json()
+    assert.deepStrictEqual(user, { username: 'nuria@coop-a.cat', name: 'Núria', role: 'user', tenant: 'coop-a' })
+
+    // The tenant is recorded on the user's tickets.
+    aiReply = JSON.stringify({ title: 'From SSO', type: 'bug', description: 'x', acceptance_criteria: ['y'] })
+    const { id } = await (await call(cookie, '/issues', { method: 'POST', body: newIssueForm('Des de la instància') })).json()
+    const file = fs.readdirSync(path.join(dataDir, 'issues')).find((f) => f.startsWith(`${id}-`))
+    assert.match(fs.readFileSync(path.join(dataDir, 'issues', file), 'utf8'), /\nauthor: nuria@coop-a.cat\ntenant: coop-a\n/)
+
+    // Replay, wrong tenant, tampering, bad tenant names.
+    assert.strictEqual((await ssoGet('coop-a', token)).status, 401)
+    assert.strictEqual((await ssoGet('coop-b', tokenFor(coop, 'x@coop-a.cat'))).status, 401)
+    assert.strictEqual((await ssoGet('coop-a', tokenFor(coop, 'x@coop-a.cat').slice(0, -2) + 'AA')).status, 401)
+    assert.strictEqual((await ssoGet('nope', tokenFor(coop, 'x@coop-a.cat'))).status, 401)
+    // Expired, or valid for too long.
+    assert.strictEqual((await ssoGet('coop-a', tokenFor(coop, 'x@coop-a.cat', { ttlSec: -120 }))).status, 401)
+    assert.strictEqual((await ssoGet('coop-a', tokenFor(coop, 'x@coop-a.cat', { ttlSec: 3600 }))).status, 401)
+    // Another tenant can't take over this user, nor sign in as an admin or a password-only user.
+    assert.strictEqual((await ssoGet('coop-b', tokenFor(other, 'nuria@coop-a.cat'))).status, 401)
+    assert.strictEqual((await ssoGet('coop-b', tokenFor(other, 'boss@coop.cat'))).status, 401)
+    assert.strictEqual((await ssoGet('coop-b', tokenFor(other, 'marta@coop.cat'))).status, 401)
+    assert.strictEqual((await ssoGet('coop-a', tokenFor(coop, 'not-an-email'))).status, 401)
+    // A disabled tenant can't sign anyone in.
+    tenants.setDisabled('coop-a', true)
+    assert.strictEqual((await ssoGet('coop-a', tokenFor(coop, 'nuria@coop-a.cat'))).status, 401)
+    tenants.setDisabled('coop-a', false)
+    // A fresh token for the same user works again.
+    assert.strictEqual((await ssoGet('coop-a', tokenFor(coop, 'nuria@coop-a.cat'))).status, 303)
+  })
 })
