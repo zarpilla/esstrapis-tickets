@@ -8,6 +8,7 @@ const config = require('./lib/config')
 const users = require('./lib/users')
 const issues = require('./lib/issues')
 const ai = require('./lib/ai')
+const translations = require('./lib/translations')
 const mailer = require('./lib/mailer')
 const sso = require('./lib/sso')
 const tenants = require('./lib/tenants')
@@ -23,7 +24,7 @@ if (!config.sessionSecret || config.sessionSecret.length < 32) {
   process.exit(1)
 }
 
-for (const dir of [config.issuesDir, config.uploadsDir, config.tmpDir]) fs.mkdirSync(dir, { recursive: true })
+for (const dir of [config.issuesDir, config.uploadsDir, config.translationsDir, config.tmpDir]) fs.mkdirSync(dir, { recursive: true })
 
 // --- Markdown: raw HTML is escaped, only safe links, no remote images ---------
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
@@ -191,15 +192,30 @@ app.get('/api/me', requireUser, (req, res) => {
 })
 
 app.get('/api/issues', requireUser, (req, res) => {
-  res.json({ issues: issues.list().filter((i) => canSee(req.user, i)).map(withAuthorName) })
+  const list = issues.list().filter((i) => canSee(req.user, i)).map((i) => ({ ...withAuthorName(i), title: translations.title(i) }))
+  res.json({ issues: list })
 })
 
-app.get('/api/issues/:id', requireUser, (req, res) => {
+// Shown in Catalan; the file stays in English. Admins also get the English original.
+app.get('/api/issues/:id', requireUser, async (req, res) => {
   const issue = issues.get(req.params.id)
   if (!issue || !canSee(req.user, issue)) return res.status(404).json({ error: 'Not found' })
+  const ca = await translations.ensure(issue, config.ai.translateWaitMs)
   const { body, ...rest } = issue
-  res.json({ issue: { ...withAuthorName(rest), canEdit: canEdit(req.user, issue), html: markdown.parse(body) } })
+  res.json({
+    issue: {
+      ...withAuthorName(rest),
+      title: ca.title,
+      canEdit: canEdit(req.user, issue),
+      html: markdown.parse(ca.body),
+      translated: ca.translated,
+      ...(ca.translated && isAdmin(req.user) ? { original: { title: issue.title, html: markdown.parse(body) } } : {}),
+    },
+  })
 })
+
+// The same issue with its Catalan title, for the emails.
+const inCatalan = (issue, ca) => issue && ca && { ...issue, title: ca.title }
 
 // Caps AI calls per user (new tickets + follow-ups), so a leaked account can't burn the z.ai quota.
 const created = new Map()
@@ -242,7 +258,8 @@ app.post('/api/issues', requireUser, creationAllowed, upload.array('files'), asy
     const id = await issues.create({ draft, originalText: text, author: req.user, attachments, isPublic })
     storeFiles(id, files, attachments)
     res.status(201).json({ id, ai: draft.ai })
-    mailer.created(issues.get(id), req.user)
+    const issue = issues.get(id)
+    translations.ensure(issue).then((ca) => mailer.created(inCatalan(issue, ca), req.user))
   } finally {
     cleanupTmp(files)
   }
@@ -262,7 +279,7 @@ app.post('/api/issues/:id/messages', requireUser, creationAllowed, upload.array(
     const updated = await issues.addFollowUp(issue.id, { draft, message: text, reply, author: req.user, attachments })
     storeFiles(issue.id, files, attachments)
     res.status(201).json({ ai: Boolean(draft), reply })
-    mailer.followUp(updated, req.user, text, reply)
+    translations.ensure(updated).then((ca) => mailer.followUp(inCatalan(updated, ca), req.user, text, reply))
   } finally {
     cleanupTmp(files)
   }
@@ -278,7 +295,7 @@ app.patch('/api/issues/:id', requireUser, async (req, res) => {
   if (status === undefined && isPublic === undefined) return res.status(400).json({ error: 'Nothing to change' })
   const updated = await issues.update(issue.id, { status, public: isPublic }, req.user)
   res.json({ ok: true })
-  mailer.changed(issue, updated, req.user)
+  mailer.changed(inCatalan(issue, translations.cached(issue)), inCatalan(updated, translations.cached(updated)), req.user)
 })
 
 app.get('/api/issues/:id/files/:file', requireUser, (req, res) => {

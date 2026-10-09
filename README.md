@@ -5,6 +5,7 @@ A small website where ESSTRAPIS users report bugs, improvements and suggestions.
 - The user writes in a textarea, in their own words, and can attach screenshots and documents.
 - A z.ai GLM model turns the text into an issue in the same format as `projectes/issues`: a `NNN-slug.md` file with YAML frontmatter, Description, Acceptance criteria, Questions and a Log. The original text is kept under "Original report". If the AI call fails, the issue is still created from the raw text.
 - On the ticket page, the user can add more information or answer the open questions, with new attachments if needed. The AI rewrites the generated sections (Description, Steps, Expected vs actual, Acceptance criteria, Notes) and replies in the user's language. It keeps hand-written notes, ticked criteria and any section added by hand. Messages and replies are kept under "Conversation".
+- Tickets are stored in English but shown in Catalan. The same model translates each ticket, and the translation is cached in `data/translations/NNN.json` under a hash of the English text. When the generated sections or the title change (also by a hand edit of the `.md`), the next view translates the ticket again. "Original report" and "Conversation" are already in the user's language and are kept as they are. The Log is translated in code, so a status change doesn't need the AI. If the translation fails, or takes longer than `ZAI_TRANSLATE_WAIT_MS`, the English text is shown. Admins can switch to the English original. Emails use the Catalan title.
 - Tickets are private by default: only the author and admins see them. A ticket marked **Públic** can be read by every user, but only its author or an admin can change its status or visibility, or add follow-ups. Each change is logged in the file.
 - Email notifications over SMTP: users whose username is an email address get an email when their ticket is created, changes status or visibility, or gets new information (with the AI reply). Admins with an email get them for every ticket. Whoever made the change isn't emailed, except for the receipt when they create a ticket. Notifications are off while `SMTP_HOST` is empty. The SMTP server is verified before the first email (and logged at start-up); if it is unreachable or rejects the login, emails are skipped and it is re-checked at most every 10 minutes.
 
@@ -14,6 +15,7 @@ There is no database: issues are Markdown files, users are a JSON file, and atta
 data/
   issues/001-add-excel-export-to-partners.md
   uploads/001/<random>.png
+  translations/001.json # Catalan version shown in the UI (a cache: safe to delete)
   users.json            # scrypt password hashes, mode 600
   tenants.json          # ESSTRAPIS instances seen through SSO (and blocked ones), mode 600
 ```

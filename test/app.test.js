@@ -14,14 +14,25 @@ process.env.TICKETS_SSO_KEY = 'shared-sso-key-for-tests-0123456789abcdef'
 
 let aiReply = null
 let aiRequest = null
+// Translation requests are answered by translate(); by default it returns the text unchanged.
+let translate = (issue) => issue
+let translationRequests = 0
 const fakeAi = http.createServer((req, res) => {
   let body = ''
   req.on('data', (c) => { body += c })
   req.on('end', () => {
-    aiRequest = { headers: req.headers, body: JSON.parse(body) }
-    if (!aiReply) { res.writeHead(500); return res.end('boom') }
+    const request = { headers: req.headers, body: JSON.parse(body) }
+    const isTranslation = /into Catalan/.test(request.body.messages[0].content)
+    let reply = aiReply
+    if (isTranslation) {
+      translationRequests++
+      reply = translate && JSON.stringify(translate(JSON.parse(request.body.messages[1].content)))
+    } else {
+      aiRequest = request
+    }
+    if (!reply) { res.writeHead(500); return res.end('boom') }
     res.writeHead(200, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify({ choices: [{ message: { content: aiReply } }] }))
+    res.end(JSON.stringify({ choices: [{ message: { content: reply } }] }))
   })
 })
 
@@ -138,7 +149,7 @@ describe('tickets app', () => {
     assert.strictEqual(ai, false)
     const { issue } = await (await call(cookie, `/issues/${id}`)).json()
     assert.strictEqual(issue.title, 'La factura surt amb data incorrecta')
-    assert.match(issue.html, /AI unavailable/)
+    assert.match(issue.html, /IA no disponible/)
   })
 
   test('rejects disallowed file types', async () => {
@@ -278,6 +289,62 @@ describe('tickets app', () => {
     // The author can make it public again.
     assert.strictEqual((await call(anna, `/issues/${id}`, { method: 'PATCH', json: { public: true } })).status, 200)
     assert.strictEqual((await call(pere, `/issues/${id}`)).status, 200)
+  })
+
+  test('tickets are shown in Catalan while the file stays in English', async () => {
+    translate = (issue) => ({
+      title: `Exporta ${issue.title}`,
+      top: issue.top.replace(' — ', ' — CA '),
+      sections: issue.sections.map((s) => ({ heading: `CA ${s.heading}`, content: `ca: ${s.content}` })),
+    })
+    try {
+      aiReply = JSON.stringify({ title: 'Export members', type: 'improvement', description: 'Members cannot be exported.', acceptance_criteria: ['An export button'] })
+      const anna = await login('anna', 'anna-password-1')
+      const admin = await login('admin', 'admin-password-1')
+      const before = translationRequests
+      const { id } = await (await call(anna, '/issues', { method: 'POST', body: newIssueForm('Voldria exportar les sòcies') })).json()
+      const file = path.join(dataDir, 'issues', fs.readdirSync(path.join(dataDir, 'issues')).find((f) => f.startsWith(`${id}-`)))
+      const english = fs.readFileSync(file, 'utf8')
+
+      let { issue } = await (await call(anna, `/issues/${id}`)).json()
+      assert.strictEqual(translationRequests, before + 1)
+      assert.strictEqual(issue.title, 'Exporta Export members')
+      assert.strictEqual(issue.translated, true)
+      assert.strictEqual(issue.original, undefined)
+      assert.match(issue.html, new RegExp(`<h1>${id} — CA Export members</h1>`))
+      assert.match(issue.html, /<h2>CA Description<\/h2>\n<p>ca: Members cannot be exported\.<\/p>/)
+      assert.match(issue.html, /<h2>Informe original<\/h2>\n<blockquote>\n<p>Voldria exportar les sòcies<\/p>/)
+      assert.match(issue.html, /<h2>Historial<\/h2>\n<ul>\n<li>[\d-]+ — creat<\/li>/)
+      assert.strictEqual(fs.readFileSync(file, 'utf8'), english)
+      assert.strictEqual((await (await call(anna, '/issues')).json()).issues.find((i) => i.id === id).title, 'Exporta Export members')
+
+      // Admins can also see the English original.
+      ;({ issue } = await (await call(admin, `/issues/${id}`)).json())
+      assert.strictEqual(issue.original.title, 'Export members')
+      assert.match(issue.original.html, /<h2>Description<\/h2>/)
+
+      // A status change only touches the Log: no new translation.
+      await call(anna, `/issues/${id}`, { method: 'PATCH', json: { status: 'done' } })
+      ;({ issue } = await (await call(anna, `/issues/${id}`)).json())
+      assert.strictEqual(translationRequests, before + 1)
+      assert.match(issue.html, /— estat Pendent → Fet \(anna\)/)
+
+      // A hand edit of the English file is translated on the next view.
+      fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('Members cannot be exported.', 'Members cannot be exported to Excel.'))
+      ;({ issue } = await (await call(anna, `/issues/${id}`)).json())
+      assert.strictEqual(translationRequests, before + 2)
+      assert.match(issue.html, /ca: Members cannot be exported to Excel\./)
+
+      // If the translation fails, the English text is shown.
+      translate = null
+      const { id: id2 } = await (await call(anna, '/issues', { method: 'POST', body: newIssueForm('Una altra cosa a exportar') })).json()
+      ;({ issue } = await (await call(anna, `/issues/${id2}`)).json())
+      assert.strictEqual(issue.translated, false)
+      assert.strictEqual(issue.title, 'Export members')
+      assert.match(issue.html, /<h2>Description<\/h2>/)
+    } finally {
+      translate = (issue) => issue
+    }
   })
 
   test('emails the author and admins whose usernames are emails, not the person who acted', async () => {

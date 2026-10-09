@@ -126,6 +126,18 @@ async function renderIssue(id, aiReply) {
   // Rendered server-side from Markdown, with raw HTML escaped and links filtered.
   document.getElementById('body').innerHTML = issue.html
 
+  // Tickets are shown in Catalan; admins can switch to the English file.
+  if (issue.original) {
+    const toggle = document.getElementById('show-original')
+    let english = false
+    toggle.parentElement.hidden = false
+    toggle.addEventListener('click', () => {
+      english = !english
+      document.getElementById('body').innerHTML = english ? issue.original.html : issue.html
+      toggle.textContent = english ? 'Mostra la traducció al català' : "Mostra l'original en anglès"
+    })
+  }
+
   const select = document.getElementById('status')
   select.replaceChildren(...session.statuses.map((s) => el('option', { value: s }, label(s))))
   select.value = issue.status
