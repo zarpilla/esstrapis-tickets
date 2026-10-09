@@ -5,7 +5,7 @@ A small website where ESSTRAPIS users report bugs, improvements and suggestions.
 - The user writes in a textarea, in their own words, and can attach screenshots and documents.
 - A z.ai GLM model turns the text into an issue in the same format as `projectes/issues`: a `NNN-slug.md` file with YAML frontmatter, Description, Acceptance criteria, Questions and a Log. The original text is kept under "Original report". If the AI call fails, the issue is still created from the raw text.
 - On the ticket page, the user can add more information or answer the open questions, with new attachments if needed. The AI rewrites the generated sections (Description, Steps, Expected vs actual, Acceptance criteria, Notes) and replies in the user's language. It keeps hand-written notes, ticked criteria and any section added by hand. Messages and replies are kept under "Conversation".
-- Users see their own tickets and can change their status. Admins see every ticket and can change any status. Each status change is logged in the file.
+- Tickets are private by default: only the author and admins see them. A ticket marked **Públic** can be read by every user, but only its author or an admin can change its status or visibility, or add follow-ups. Each change is logged in the file.
 
 There is no database: issues are Markdown files, users are a JSON file, and attachments sit on disk.
 

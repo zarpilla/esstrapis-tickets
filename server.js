@@ -120,7 +120,9 @@ app.use('/api', (req, res, next) => { res.setHeader('Cache-Control', 'no-store')
 
 const requireUser = (req, res, next) => (req.user ? next() : res.status(401).json({ error: 'Not logged in' }))
 const isAdmin = (user) => user.role === 'admin'
-const canSee = (user, issue) => isAdmin(user) || issue.author === user.username
+// Public tickets can be read by every user; only the author or an admin can change one.
+const canEdit = (user, issue) => isAdmin(user) || issue.author === user.username
+const canSee = (user, issue) => canEdit(user, issue) || issue.public === true
 
 function withAuthorName(issue) {
   const author = users.find(issue.author)
@@ -158,7 +160,7 @@ app.get('/api/issues/:id', requireUser, (req, res) => {
   const issue = issues.get(req.params.id)
   if (!issue || !canSee(req.user, issue)) return res.status(404).json({ error: 'Not found' })
   const { body, ...rest } = issue
-  res.json({ issue: { ...withAuthorName(rest), html: markdown.parse(body) } })
+  res.json({ issue: { ...withAuthorName(rest), canEdit: canEdit(req.user, issue), html: markdown.parse(body) } })
 })
 
 // Caps AI calls per user (new tickets + follow-ups), so a leaked account can't burn the z.ai quota.
@@ -198,7 +200,8 @@ app.post('/api/issues', requireUser, creationAllowed, upload.array('files'), asy
     if (text.length < 10) return res.status(400).json({ error: 'Write at least 10 characters' })
     const draft = await ai.draftIssue(text, files)
     const attachments = describeFiles(files)
-    const id = await issues.create({ draft, originalText: text, author: req.user, attachments })
+    const isPublic = req.body.public === 'true'
+    const id = await issues.create({ draft, originalText: text, author: req.user, attachments, isPublic })
     storeFiles(id, files, attachments)
     res.status(201).json({ id, ai: draft.ai })
   } finally {
@@ -212,6 +215,7 @@ app.post('/api/issues/:id/messages', requireUser, creationAllowed, upload.array(
   try {
     const issue = issues.get(req.params.id)
     if (!issue || !canSee(req.user, issue)) return res.status(404).json({ error: 'Not found' })
+    if (!canEdit(req.user, issue)) return res.status(403).json({ error: 'Only the author or an admin can change this ticket' })
     const text = readText(req)
     const current = `Type: ${issue.type} · Priority: ${issue.priority} · Project: ${issue.project || '-'}\n\n${issue.body}`
     const { draft, reply } = await ai.reviseIssue(current, text, files)
@@ -227,9 +231,12 @@ app.post('/api/issues/:id/messages', requireUser, creationAllowed, upload.array(
 app.patch('/api/issues/:id', requireUser, async (req, res) => {
   const issue = issues.get(req.params.id)
   if (!issue || !canSee(req.user, issue)) return res.status(404).json({ error: 'Not found' })
-  const { status } = req.body || {}
-  if (!issues.STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid status' })
-  await issues.setStatus(issue.id, status, req.user)
+  if (!canEdit(req.user, issue)) return res.status(403).json({ error: 'Only the author or an admin can change this ticket' })
+  const { status, public: isPublic } = req.body || {}
+  if (status !== undefined && !issues.STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid status' })
+  if (isPublic !== undefined && typeof isPublic !== 'boolean') return res.status(400).json({ error: 'Invalid visibility' })
+  if (status === undefined && isPublic === undefined) return res.status(400).json({ error: 'Nothing to change' })
+  await issues.update(issue.id, { status, public: isPublic }, req.user)
   res.json({ ok: true })
 })
 

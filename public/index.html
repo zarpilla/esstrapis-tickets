@@ -40,6 +40,7 @@
       <p class="muted">Explica l'error, la millora o el suggeriment amb les teves paraules: què volies fer, a quina pàgina, què ha passat. Pots adjuntar captures i documents.</p>
       <form id="new-form">
         <textarea name="text" rows="7" minlength="10" maxlength="20000" required placeholder="Ex.: A la pàgina de Factures, quan canvio la data d'una factura emesa..."></textarea>
+        <label class="check"><input type="checkbox" name="public" value="true"> Públic: tots els usuaris el poden veure</label>
         <div class="row">
           <input type="file" name="files" multiple>
           <button type="submit">Envia</button>
@@ -60,7 +61,7 @@
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>#</th><th>Títol</th><th>Tipus</th><th>Estat</th><th>Prioritat</th><th class="col-author">Autor</th><th>Actualitzat</th></tr></thead>
+          <thead><tr><th>#</th><th>Títol</th><th>Tipus</th><th>Estat</th><th>Prioritat</th><th>Autor</th><th>Actualitzat</th></tr></thead>
           <tbody id="list"></tbody>
         </table>
       </div>
@@ -79,8 +80,10 @@
       </div>
       <div class="row status-row">
         <label>Estat <select id="status"></select></label>
+        <label class="check"><input type="checkbox" id="public"> Públic</label>
         <span class="muted" id="status-msg"></span>
       </div>
+      <p class="muted readonly-note" hidden>Tiquet públic: només l'autor o un administrador el poden modificar.</p>
       <article id="body" class="md"></article>
       <div id="attachments" hidden>
         <h2>Adjunts</h2>
@@ -88,7 +91,7 @@
       </div>
     </section>
 
-    <section class="card">
+    <section class="card" id="followup">
       <h2>Afegeix informació</h2>
       <p class="muted">Respon les preguntes o explica més detalls. L'IA actualitzarà el tiquet i et contestarà.</p>
       <p class="ai-reply" hidden></p>

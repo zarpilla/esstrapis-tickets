@@ -89,7 +89,6 @@ async function renderHome() {
   filter.append(el('optgroup', { label: 'Per estat' }, ...session.statuses.map((s) => el('option', { value: `status:${s}` }, label(s)))))
   try { filter.value = localStorage.getItem('filter') || 'open' } catch { /* storage blocked */ }
   if (!filter.value) filter.value = 'open'
-  if (session.user.role !== 'admin') view.querySelectorAll('.col-author').forEach((th) => th.remove())
 
   const { issues } = await api('/issues')
   const draw = () => {
@@ -99,11 +98,11 @@ async function renderHome() {
     const shown = issues.filter((i) => f === 'all' || (f.startsWith('status:') ? i.status === f.slice(7) : (f === 'closed') === isClosed(i)))
     document.getElementById('list').replaceChildren(...shown.map((i) => el('tr', {},
       el('td', {}, i.id),
-      el('td', {}, el('a', { href: `#/issue/${i.id}` }, i.title || '(sense títol)')),
+      el('td', {}, el('a', { href: `#/issue/${i.id}` }, i.title || '(sense títol)'), i.public ? el('span', { class: 'badge public', title: 'Visible per a tots els usuaris' }, 'Públic') : null),
       el('td', {}, badge('t', i.type)),
       el('td', {}, el('span', { class: `status s-${i.status}` }, label(i.status))),
       el('td', {}, badge('p', i.priority)),
-      session.user.role === 'admin' ? el('td', {}, i.authorName) : null,
+      el('td', {}, i.authorName),
       el('td', { class: 'nowrap' }, i.updated || ''),
     )))
     document.getElementById('empty').hidden = shown.length > 0
@@ -131,19 +130,31 @@ async function renderIssue(id, aiReply) {
   select.replaceChildren(...session.statuses.map((s) => el('option', { value: s }, label(s))))
   select.value = issue.status
   select.className = `status-select s-${issue.status}`
+  const publicBox = document.getElementById('public')
+  publicBox.checked = issue.public
   const msg = document.getElementById('status-msg')
-  select.addEventListener('change', async () => {
+  const save = async (changes) => {
     msg.textContent = 'Desant…'
     try {
-      await api(`/issues/${issue.id}`, { method: 'PATCH', json: { status: select.value } })
-      msg.textContent = 'Desat'
-      renderIssue(id)
+      await api(`/issues/${issue.id}`, { method: 'PATCH', json: changes })
+      await renderIssue(id)
+      document.getElementById('status-msg').textContent = 'Desat'
     } catch (err) {
       msg.textContent = err.message
       select.value = issue.status
-  select.className = `status-select s-${issue.status}`
+      publicBox.checked = issue.public
     }
-  })
+  }
+  select.addEventListener('change', () => save({ status: select.value }))
+  publicBox.addEventListener('change', () => save({ public: publicBox.checked }))
+
+  // Public tickets of other users are read-only.
+  if (!issue.canEdit) {
+    select.disabled = true
+    publicBox.disabled = true
+    view.querySelector('.readonly-note').hidden = false
+    document.getElementById('followup').remove()
+  }
 
   const replyBox = view.querySelector('.ai-reply')
   if (aiReply) {
@@ -152,8 +163,8 @@ async function renderIssue(id, aiReply) {
   }
 
   const form = document.getElementById('followup-form')
-  form.querySelector('input[type=file]').accept = session.upload.extensions.join(',')
-  form.addEventListener('submit', async (e) => {
+  if (form) form.querySelector('input[type=file]').accept = session.upload.extensions.join(',')
+  form?.addEventListener('submit', async (e) => {
     e.preventDefault()
     showError(form)
     const button = form.querySelector('button')

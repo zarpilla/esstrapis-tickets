@@ -244,4 +244,38 @@ describe('tickets app', () => {
     const pere = await login('pere', 'pere-password-2')
     assert.strictEqual((await call(pere, '/issues/001/messages', { method: 'POST', body: newIssueForm('Hijack') })).status, 404)
   })
+
+  test('public tickets are readable by everyone but only the author or an admin can change them', async () => {
+    aiReply = JSON.stringify({ title: 'Shared idea', type: 'suggestion', description: 'An idea.', acceptance_criteria: ['x'] })
+    const anna = await login('anna', 'anna-password-1')
+    const pere = await login('pere', 'pere-password-2')
+    const admin = await login('admin', 'admin-password-1')
+
+    const form = newIssueForm('Una idea per a tothom', [['shot.png', 'PUB', 'image/png']])
+    form.append('public', 'true')
+    const { id } = await (await call(anna, '/issues', { method: 'POST', body: form })).json()
+    const file = fs.readdirSync(path.join(dataDir, 'issues')).find((f) => f.startsWith(`${id}-`))
+    assert.match(fs.readFileSync(path.join(dataDir, 'issues', file), 'utf8'), /\npublic: true\n/)
+
+    // Pere can list, read and download, but not change it.
+    assert.ok((await (await call(pere, '/issues')).json()).issues.some((i) => i.id === id && i.public))
+    const { issue } = await (await call(pere, `/issues/${id}`)).json()
+    assert.strictEqual(issue.canEdit, false)
+    assert.strictEqual(await (await call(pere, `/issues/${id}/files/${issue.attachments[0].file}`)).text(), 'PUB')
+    assert.strictEqual((await call(pere, `/issues/${id}`, { method: 'PATCH', json: { status: 'done' } })).status, 403)
+    assert.strictEqual((await call(pere, `/issues/${id}`, { method: 'PATCH', json: { public: false } })).status, 403)
+    assert.strictEqual((await call(pere, `/issues/${id}/messages`, { method: 'POST', body: newIssueForm('meddling') })).status, 403)
+    assert.strictEqual((await (await call(anna, `/issues/${id}`)).json()).issue.canEdit, true)
+
+    // Admin makes it private: Pere loses access.
+    assert.strictEqual((await call(admin, `/issues/${id}`, { method: 'PATCH', json: { public: 'yes' } })).status, 400)
+    assert.strictEqual((await call(admin, `/issues/${id}`, { method: 'PATCH', json: { public: false } })).status, 200)
+    assert.strictEqual((await call(pere, `/issues/${id}`)).status, 404)
+    assert.strictEqual((await call(pere, `/issues/${id}/files/${issue.attachments[0].file}`)).status, 404)
+    assert.match(fs.readFileSync(path.join(dataDir, 'issues', file), 'utf8'), /\npublic: false\n[\s\S]*— made private \(admin\)\n$/)
+
+    // The author can make it public again.
+    assert.strictEqual((await call(anna, `/issues/${id}`, { method: 'PATCH', json: { public: true } })).status, 200)
+    assert.strictEqual((await call(pere, `/issues/${id}`)).status, 200)
+  })
 })
