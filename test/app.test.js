@@ -6,6 +6,7 @@ const path = require('path')
 const http = require('http')
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tickets-test-'))
+process.env.TICKETS_NO_DOTENV = '1'
 process.env.DATA_DIR = dataDir
 process.env.SESSION_SECRET = 'x'.repeat(40)
 process.env.ZAI_API_KEY = 'test-key'
