@@ -19,7 +19,7 @@ data/
 
 ## Run locally
 
-Requires Node ≥ 18.
+Requires Node ≥ 20 (`nvm use` picks it up from `.nvmrc`).
 
 ```bash
 npm install
