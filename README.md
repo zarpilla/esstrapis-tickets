@@ -25,7 +25,7 @@ Requires Node ≥ 20 (`nvm use` picks it up from `.nvmrc`).
 ```bash
 npm install
 cp .env.example .env        # set SESSION_SECRET (openssl rand -hex 32) and ZAI_API_KEY; NODE_ENV= (empty) for http://localhost
-npm run user -- add jordi@example.org "Jordi Sabaté" admin
+npm run user -- add admin@example.org "Admin" admin
 npm start                   # http://127.0.0.1:3000
 npm test
 ```
