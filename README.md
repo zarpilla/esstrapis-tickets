@@ -6,6 +6,7 @@ A small website where ESSTRAPIS users report bugs, improvements and suggestions.
 - A z.ai GLM model turns the text into an issue in the same format as `projectes/issues`: a `NNN-slug.md` file with YAML frontmatter, Description, Acceptance criteria, Questions and a Log. The original text is kept under "Original report". If the AI call fails, the issue is still created from the raw text.
 - On the ticket page, the user can add more information or answer the open questions, with new attachments if needed. The AI rewrites the generated sections (Description, Steps, Expected vs actual, Acceptance criteria, Notes) and replies in the user's language. It keeps hand-written notes, ticked criteria and any section added by hand. Messages and replies are kept under "Conversation".
 - Tickets are private by default: only the author and admins see them. A ticket marked **Públic** can be read by every user, but only its author or an admin can change its status or visibility, or add follow-ups. Each change is logged in the file.
+- Email notifications over SMTP: users whose username is an email address get an email when their ticket is created, changes status or visibility, or gets new information (with the AI reply). Admins with an email get them for every ticket. Whoever made the change isn't emailed, except for the receipt when they create a ticket. Notifications are off while `SMTP_HOST` is empty.
 
 There is no database: issues are Markdown files, users are a JSON file, and attachments sit on disk.
 
@@ -23,7 +24,7 @@ Requires Node ≥ 18.
 ```bash
 npm install
 cp .env.example .env        # set SESSION_SECRET (openssl rand -hex 32) and ZAI_API_KEY; NODE_ENV= (empty) for http://localhost
-npm run user -- add jordi "Jordi Sabaté" admin
+npm run user -- add jordi@example.org "Jordi Sabaté" admin
 npm start                   # http://127.0.0.1:3000
 npm test
 ```
@@ -33,7 +34,7 @@ npm test
 There is no sign-up page. Manage users on the server:
 
 ```bash
-npm run user -- add <username> "<Full name>" [user|admin]   # asks for the password (min 10 chars)
+npm run user -- add <email> "<Full name>" [user|admin]      # asks for the password (min 10 chars)
 npm run user -- passwd <username>                           # also logs out their sessions
 npm run user -- role <username> admin
 npm run user -- disable <username>
@@ -57,7 +58,7 @@ sudo git clone <repo> /opt/esstrapis-tickets && cd /opt/esstrapis-tickets
 sudo npm ci --omit=dev
 sudo cp .env.example .env && sudo nano .env      # NODE_ENV=production, TRUST_PROXY=1, secrets
 sudo mkdir -p data && sudo chown -R tickets:tickets data && sudo chown root:tickets .env && sudo chmod 640 .env
-sudo -u tickets npm run user -- add admin "Admin" admin
+sudo -u tickets npm run user -- add admin@example.org "Admin" admin
 sudo cp deploy/esstrapis-tickets.service /etc/systemd/system/ && sudo systemctl enable --now esstrapis-tickets
 sudo cp deploy/nginx.conf /etc/nginx/sites-available/tickets   # edit server_name, enable, then certbot --nginx
 ```

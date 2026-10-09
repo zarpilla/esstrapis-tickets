@@ -278,4 +278,54 @@ describe('tickets app', () => {
     assert.strictEqual((await call(anna, `/issues/${id}`, { method: 'PATCH', json: { public: true } })).status, 200)
     assert.strictEqual((await call(pere, `/issues/${id}`)).status, 200)
   })
+
+  test('emails the author and admins whose usernames are emails, not the person who acted', async () => {
+    const users = require('../lib/users')
+    const mailer = require('../lib/mailer')
+    users.upsert({ username: 'Marta@Coop.cat', name: 'Marta', role: 'user', password: 'marta-password-1' })
+    users.upsert({ username: 'boss@coop.cat', name: 'Boss', role: 'admin', password: 'boss-password-1' })
+    users.upsert({ username: 'gone@coop.cat', name: 'Gone', role: 'admin', password: 'gone-password-1' })
+    users.setDisabled('gone@coop.cat', true)
+    assert.throws(() => users.upsert({ username: 'bad@@coop.cat', password: 'whatever-123' }), /Username/)
+
+    const sent = []
+    mailer.setTransport({ sendMail: async (m) => { sent.push(m) } })
+    const waitFor = async (n) => {
+      for (let i = 0; i < 50 && sent.length < n; i++) await new Promise((r) => setTimeout(r, 10))
+      assert.strictEqual(sent.length, n)
+      return sent.splice(0).sort((a, b) => a.to.localeCompare(b.to))
+    }
+    try {
+      aiReply = JSON.stringify({ title: 'Slow\r\nBcc: x@evil.com', type: 'bug', description: 'Slow.', acceptance_criteria: ['fast'] })
+      const marta = await login('marta@coop.cat', 'marta-password-1')
+      const boss = await login('boss@coop.cat', 'boss-password-1')
+      const { id } = await (await call(marta, '/issues', { method: 'POST', body: newIssueForm('Va molt lent tot') })).json()
+
+      // Created: receipt to the author + every admin with an email (not disabled, not plain usernames).
+      let mails = await waitFor(2)
+      assert.deepStrictEqual(mails.map((m) => m.to), ['boss@coop.cat', 'marta@coop.cat'])
+      assert.strictEqual(mails[0].subject, `[Tiquet #${id}] Slow Bcc: x@evil.com — Nou tiquet`)
+      assert.match(mails[0].text, /Marta ha creat el tiquet/)
+
+      // Admin changes the status: only the author is told.
+      await call(boss, `/issues/${id}`, { method: 'PATCH', json: { status: 'in-progress' } })
+      mails = await waitFor(1)
+      assert.strictEqual(mails[0].to, 'marta@coop.cat')
+      assert.match(mails[0].subject, /Estat: En procés$/)
+      assert.match(mails[0].text, /Estat: Pendent → En procés/)
+
+      // Author adds info: admins are told, with the AI reply.
+      aiReply = JSON.stringify({ title: 'Slow', type: 'bug', description: 'Slow everywhere.', acceptance_criteria: ['fast'], reply: 'Entesos, gràcies.' })
+      await call(marta, `/issues/${id}/messages`, { method: 'POST', body: newIssueForm('A totes les pàgines') })
+      mails = await waitFor(1)
+      assert.strictEqual(mails[0].to, 'boss@coop.cat')
+      assert.match(mails[0].text, /A totes les pàgines[\s\S]*Resposta de l'IA:\n  Entesos, gràcies\./)
+
+      // A failing SMTP server doesn't break the request.
+      mailer.setTransport({ sendMail: async () => { throw new Error('SMTP down') } })
+      assert.strictEqual((await call(boss, `/issues/${id}`, { method: 'PATCH', json: { status: 'done' } })).status, 200)
+    } finally {
+      mailer.setTransport(null)
+    }
+  })
 })

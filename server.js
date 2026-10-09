@@ -8,6 +8,7 @@ const config = require('./lib/config')
 const users = require('./lib/users')
 const issues = require('./lib/issues')
 const ai = require('./lib/ai')
+const mailer = require('./lib/mailer')
 const { setSession, clearSession, sessionMiddleware } = require('./lib/session')
 
 if (!config.sessionSecret || config.sessionSecret.length < 32) {
@@ -204,6 +205,7 @@ app.post('/api/issues', requireUser, creationAllowed, upload.array('files'), asy
     const id = await issues.create({ draft, originalText: text, author: req.user, attachments, isPublic })
     storeFiles(id, files, attachments)
     res.status(201).json({ id, ai: draft.ai })
+    mailer.created(issues.get(id), req.user)
   } finally {
     cleanupTmp(files)
   }
@@ -220,9 +222,10 @@ app.post('/api/issues/:id/messages', requireUser, creationAllowed, upload.array(
     const current = `Type: ${issue.type} · Priority: ${issue.priority} · Project: ${issue.project || '-'}\n\n${issue.body}`
     const { draft, reply } = await ai.reviseIssue(current, text, files)
     const attachments = describeFiles(files)
-    await issues.addFollowUp(issue.id, { draft, message: text, reply, author: req.user, attachments })
+    const updated = await issues.addFollowUp(issue.id, { draft, message: text, reply, author: req.user, attachments })
     storeFiles(issue.id, files, attachments)
     res.status(201).json({ ai: Boolean(draft), reply })
+    mailer.followUp(updated, req.user, text, reply)
   } finally {
     cleanupTmp(files)
   }
@@ -236,8 +239,9 @@ app.patch('/api/issues/:id', requireUser, async (req, res) => {
   if (status !== undefined && !issues.STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid status' })
   if (isPublic !== undefined && typeof isPublic !== 'boolean') return res.status(400).json({ error: 'Invalid visibility' })
   if (status === undefined && isPublic === undefined) return res.status(400).json({ error: 'Nothing to change' })
-  await issues.update(issue.id, { status, public: isPublic }, req.user)
+  const updated = await issues.update(issue.id, { status, public: isPublic }, req.user)
   res.json({ ok: true })
+  mailer.changed(issue, updated, req.user)
 })
 
 app.get('/api/issues/:id/files/:file', requireUser, (req, res) => {
@@ -265,7 +269,10 @@ app.use((err, req, res, next) => {
 })
 
 if (require.main === module) {
-  app.listen(config.port, config.host, () => console.log(`Tickets listening on http://${config.host}:${config.port}`))
+  app.listen(config.port, config.host, () => {
+    console.log(`Tickets listening on http://${config.host}:${config.port}`)
+    console.log(mailer.enabled() ? `Email notifications on (SMTP ${config.smtp.host})` : 'Email notifications off (no SMTP_HOST)')
+  })
 }
 
 module.exports = app
