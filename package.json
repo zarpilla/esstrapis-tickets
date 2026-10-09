@@ -1,0 +1,22 @@
+{
+  "name": "esstrapis-tickets",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Simple ticketing site for ESSTRAPIS issues, improvements and suggestions",
+  "main": "server.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "user": "node scripts/user.js",
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "marked": "^15.0.12",
+    "multer": "^2.4.0",
+    "yaml": "^2.9.1"
+  }
+}

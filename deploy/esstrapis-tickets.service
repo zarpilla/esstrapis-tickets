@@ -1,0 +1,21 @@
+[Unit]
+Description=ESSTRAPIS tickets
+After=network.target
+
+[Service]
+Type=simple
+User=tickets
+Group=tickets
+WorkingDirectory=/opt/esstrapis-tickets
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+# Hardening: the app only needs to write to its data folder
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/esstrapis-tickets/data
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

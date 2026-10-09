@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="ca">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ESSTRAPIS · Tiquets</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a href="#/" class="brand">ESSTRAPIS <span>Tiquets</span></a>
+    <div id="whoami" hidden>
+      <span id="username"></span>
+      <button id="logout" class="link">Surt</button>
+    </div>
+  </header>
+
+  <main id="view"></main>
+
+  <template id="tpl-login">
+    <section class="card narrow">
+      <h1>Entra</h1>
+      <form id="login-form">
+        <label>Usuari <input name="username" autocomplete="username" required></label>
+        <label>Contrasenya <input name="password" type="password" autocomplete="current-password" required></label>
+        <p class="error" hidden></p>
+        <button type="submit">Entra</button>
+      </form>
+    </section>
+  </template>
+
+  <template id="tpl-home">
+    <section class="card">
+      <h1>Nou tiquet</h1>
+      <p class="muted">Explica l'error, la millora o el suggeriment amb les teves paraules: què volies fer, a quina pàgina, què ha passat. Pots adjuntar captures i documents.</p>
+      <form id="new-form">
+        <textarea name="text" rows="7" minlength="10" maxlength="20000" required placeholder="Ex.: A la pàgina de Factures, quan canvio la data d'una factura emesa..."></textarea>
+        <div class="row">
+          <input type="file" name="files" multiple>
+          <button type="submit">Envia</button>
+        </div>
+        <p class="hint muted"></p>
+        <p class="error" hidden></p>
+      </form>
+    </section>
+
+    <section class="card">
+      <div class="row">
+        <h2>Tiquets</h2>
+        <select id="filter">
+          <option value="open">Oberts</option>
+          <option value="closed">Tancats</option>
+          <option value="all">Tots</option>
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>#</th><th>Títol</th><th>Tipus</th><th>Estat</th><th>Prioritat</th><th class="col-author">Autor</th><th>Actualitzat</th></tr></thead>
+          <tbody id="list"></tbody>
+        </table>
+      </div>
+      <p id="empty" class="muted" hidden>No hi ha tiquets.</p>
+    </section>
+  </template>
+
+  <template id="tpl-issue">
+    <p><a href="#/">← Tots els tiquets</a></p>
+    <section class="card">
+      <div class="meta">
+        <span class="badge" data-k="type"></span>
+        <span class="badge" data-k="priority"></span>
+        <span class="muted" data-k="project"></span>
+        <span class="muted" data-k="author"></span>
+      </div>
+      <div class="row status-row">
+        <label>Estat <select id="status"></select></label>
+        <span class="muted" id="status-msg"></span>
+      </div>
+      <article id="body" class="md"></article>
+      <div id="attachments" hidden>
+        <h2>Adjunts</h2>
+        <ul class="files"></ul>
+      </div>
+    </section>
+  </template>
+</body>
+</html>

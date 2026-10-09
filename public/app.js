@@ -1,0 +1,183 @@
+'use strict'
+
+const LABELS = {
+  todo: 'Pendent', 'in-progress': 'En curs', blocked: 'Bloquejat', review: 'En revisió', done: 'Fet', wontfix: 'Descartat',
+  bug: 'Error', improvement: 'Millora', suggestion: 'Suggeriment',
+  low: 'Baixa', medium: 'Mitjana', high: 'Alta', urgent: 'Urgent',
+}
+const label = (k) => LABELS[k] || k || ''
+
+let session = null // { user, statuses, closed, upload }
+const view = document.getElementById('view')
+
+async function api(path, options = {}) {
+  const res = await fetch(`/api${path}`, {
+    ...options,
+    credentials: 'same-origin',
+    headers: { 'X-Requested-With': 'tickets', ...(options.json ? { 'Content-Type': 'application/json' } : {}), ...options.headers },
+    body: options.json ? JSON.stringify(options.json) : options.body,
+  })
+  const data = await res.json().catch(() => ({}))
+  if (res.status === 401 && path !== '/login') { session = null; render(); throw new Error('Sessió caducada') }
+  if (!res.ok) throw new Error(data.error || `Error ${res.status}`)
+  return data
+}
+
+function mount(id) {
+  view.replaceChildren(document.getElementById(id).content.cloneNode(true))
+}
+
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag)
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'class') node.className = v
+    else node.setAttribute(k, v)
+  }
+  node.append(...children.filter((c) => c != null))
+  return node
+}
+
+function showError(form, err) {
+  const p = form.querySelector('.error')
+  p.textContent = err ? err.message : ''
+  p.hidden = !err
+}
+
+// --- Views ---------------------------------------------------------------------
+function renderLogin() {
+  mount('tpl-login')
+  const form = document.getElementById('login-form')
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    showError(form)
+    try {
+      await api('/login', { method: 'POST', json: Object.fromEntries(new FormData(form)) })
+      await loadSession()
+      render()
+    } catch (err) { showError(form, err) }
+  })
+}
+
+async function renderHome() {
+  mount('tpl-home')
+  const form = document.getElementById('new-form')
+  const hint = form.querySelector('.hint')
+  const fileInput = form.querySelector('input[type=file]')
+  fileInput.accept = session.upload.extensions.join(',')
+  hint.textContent = `Fins a ${session.upload.maxFiles} fitxers de ${session.upload.maxFileMb} MB: imatges, PDF, text, Office/LibreOffice.`
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    showError(form)
+    const button = form.querySelector('button')
+    button.disabled = true
+    button.textContent = 'Redactant el tiquet…'
+    try {
+      const { id } = await api('/issues', { method: 'POST', body: new FormData(form) })
+      location.hash = `#/issue/${id}`
+    } catch (err) {
+      showError(form, err)
+    } finally {
+      button.disabled = false
+      button.textContent = 'Envia'
+    }
+  })
+
+  const filter = document.getElementById('filter')
+  try { filter.value = localStorage.getItem('filter') || 'open' } catch { /* storage blocked */ }
+  if (session.user.role !== 'admin') view.querySelectorAll('.col-author').forEach((th) => th.remove())
+
+  const { issues } = await api('/issues')
+  const draw = () => {
+    try { localStorage.setItem('filter', filter.value) } catch { /* storage blocked */ }
+    const isClosed = (i) => session.closed.includes(i.status)
+    const shown = issues.filter((i) => filter.value === 'all' || (filter.value === 'closed') === isClosed(i))
+    document.getElementById('list').replaceChildren(...shown.map((i) => el('tr', {},
+      el('td', {}, i.id),
+      el('td', {}, el('a', { href: `#/issue/${i.id}` }, i.title || '(sense títol)')),
+      el('td', {}, label(i.type)),
+      el('td', {}, el('span', { class: `status s-${i.status}` }, label(i.status))),
+      el('td', {}, label(i.priority)),
+      session.user.role === 'admin' ? el('td', {}, i.authorName) : null,
+      el('td', { class: 'nowrap' }, i.updated || ''),
+    )))
+    document.getElementById('empty').hidden = shown.length > 0
+  }
+  filter.addEventListener('change', draw)
+  draw()
+}
+
+async function renderIssue(id) {
+  mount('tpl-issue')
+  const { issue } = await api(`/issues/${encodeURIComponent(id)}`)
+  document.title = `#${issue.id} ${issue.title} · Tiquets`
+  const set = (k, text) => { view.querySelector(`[data-k="${k}"]`).textContent = text }
+  set('type', label(issue.type))
+  set('priority', `Prioritat ${label(issue.priority).toLowerCase()}`)
+  set('project', issue.project || '')
+  set('author', `per ${issue.authorName} · ${issue.created}`)
+
+  // Rendered server-side from Markdown, with raw HTML escaped and links filtered.
+  document.getElementById('body').innerHTML = issue.html
+
+  const select = document.getElementById('status')
+  select.replaceChildren(...session.statuses.map((s) => el('option', { value: s }, label(s))))
+  select.value = issue.status
+  const msg = document.getElementById('status-msg')
+  select.addEventListener('change', async () => {
+    msg.textContent = 'Desant…'
+    try {
+      await api(`/issues/${issue.id}`, { method: 'PATCH', json: { status: select.value } })
+      msg.textContent = 'Desat'
+      renderIssue(id)
+    } catch (err) {
+      msg.textContent = err.message
+      select.value = issue.status
+    }
+  })
+
+  if (issue.attachments.length) {
+    const box = document.getElementById('attachments')
+    box.hidden = false
+    box.querySelector('ul').replaceChildren(...issue.attachments.map((a) => {
+      const href = `/api/issues/${issue.id}/files/${encodeURIComponent(a.file)}`
+      const isImage = /\.(png|jpe?g|gif|webp)$/i.test(a.file)
+      return el('li', {},
+        isImage ? el('a', { href, target: '_blank', rel: 'noopener' }, el('img', { src: href, alt: a.name, loading: 'lazy' })) : null,
+        el('a', { href, target: '_blank', rel: 'noopener' }, a.name),
+        el('span', { class: 'muted' }, ` ${(a.size / 1024).toFixed(0)} KB`),
+      )
+    }))
+  }
+}
+
+// --- Router --------------------------------------------------------------------
+async function loadSession() {
+  try { session = await api('/me') } catch { session = null }
+  const who = document.getElementById('whoami')
+  who.hidden = !session
+  if (session) document.getElementById('username').textContent = `${session.user.name}${session.user.role === 'admin' ? ' (admin)' : ''}`
+}
+
+async function render() {
+  document.title = 'ESSTRAPIS · Tiquets'
+  if (!session) return renderLogin()
+  const m = location.hash.match(/^#\/issue\/(\d+)$/)
+  try {
+    if (m) await renderIssue(m[1])
+    else await renderHome()
+  } catch (err) {
+    if (session) view.replaceChildren(el('section', { class: 'card' }, el('p', { class: 'error' }, err.message), el('a', { href: '#/' }, '← Tots els tiquets')))
+  }
+}
+
+document.getElementById('logout').addEventListener('click', async () => {
+  await api('/logout', { method: 'POST' }).catch(() => {})
+  session = null
+  document.getElementById('whoami').hidden = true
+  location.hash = '#/'
+  render()
+})
+
+window.addEventListener('hashchange', render)
+loadSession().then(render)
