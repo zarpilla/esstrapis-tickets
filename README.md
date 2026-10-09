@@ -78,11 +78,14 @@ GET  /api/v1/issues/:id     { id, file, hash, markdown }
 POST /api/v1/issues         { markdown, slug? } → new ticket with the next free id
 PUT  /api/v1/issues/:id     { markdown, slug? } → create or replace ticket :id
                             If-Match: <hash> (412 if it changed since) · If-None-Match: * (only create)
+POST /api/v1/issues/:id/files         multipart `files` → added to the ticket's attachments
+GET  /api/v1/issues/:id/files/:file   download an attachment
 ```
 
 - The frontmatter must have `title`, `type` (bug · improvement · suggestion), `status`, `priority`, and dates as `YYYY-MM-DD`. `public` defaults to false. The `id` field and the `# NNN —` heading are rewritten to the ticket's id.
 - `author`, `tenant` and `attachments` belong to the site. They are kept from the stored file, whatever the request says. Tickets created through the API have no author: only admins see them, as written by "Equip ESSTRAPIS".
 - A status or visibility change through `PUT` emails the author and admins, as on the site. Creating doesn't, so a bulk import is silent.
+- Attaching changes only the `attachments` frontmatter (the hash changes too). A Markdown image whose file name is one of the ticket's image attachments, e.g. `![list](img/013/list.png)`, shows that attachment inline on the site; other images stay as their alt text.
 - Wrong keys count towards the same per-IP lockout as logins.
 
 The client is `projectes/.claude/skills/issue/tiquets.mjs` (`status`, `push`, `pull`, `create`, `show`). It mirrors the site into this repo's `data/issues` (gitignored), so `npm start` locally shows the same tickets, and keeps the last synced hashes in `data/.tiquets-sync.json`.

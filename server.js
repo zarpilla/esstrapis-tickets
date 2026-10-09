@@ -34,6 +34,7 @@ for (const dir of [config.issuesDir, config.uploadsDir, config.translationsDir, 
 // --- Markdown: raw HTML is escaped, only safe links, no remote images ---------
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 const safeHref = (href) => (/^(https?:|mailto:|#)/i.test(href || '') ? href : null)
+const ATTACHMENT_URL = /^\/api\/issues\/\d{3,}\/files\/[a-f0-9]{24}\.[a-z0-9]+$/
 const markdown = new Marked({
   renderer: {
     html({ text }) { return escapeHtml(text) },
@@ -42,7 +43,10 @@ const markdown = new Marked({
       const safe = safeHref(href)
       return safe ? `<a href="${escapeHtml(safe)}" rel="noopener noreferrer nofollow" target="_blank">${label}</a>` : label
     },
-    image({ text }) { return escapeHtml(text) },
+    // Only the ticket's own attachments (see inlineAttachments); no remote images.
+    image({ href, text }) {
+      return ATTACHMENT_URL.test(href || '') ? `<img src="${escapeHtml(href)}" alt="${escapeHtml(text)}" loading="lazy">` : escapeHtml(text)
+    },
   },
 })
 
@@ -69,6 +73,30 @@ const upload = multer({
     cb(Object.assign(new Error(`File type not allowed: ${file.originalname}`), { status: 400 }))
   },
 })
+
+// A Markdown image whose file name is one of the ticket's image attachments shows
+// that attachment, wherever the path points (e.g. img/013/list.png from the team's
+// local issues).
+function inlineAttachments(issue, md) {
+  return md.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (m, alt, href) => {
+    let name
+    try { name = decodeURIComponent(href.split('/').pop()) } catch { return m }
+    const att = issue.attachments.find((a) => a.name === name && (ALLOWED_UPLOADS[extOf(a.file)] || '').startsWith('image/'))
+    return att ? `![${alt}](/api/issues/${issue.id}/files/${att.file})` : m
+  })
+}
+
+function sendAttachment(res, issue, name) {
+  const att = issue.attachments.find((a) => a.file === name)
+  if (!att || !/^[a-f0-9]{24}\.[a-z0-9]+$/.test(att.file)) return res.status(404).end()
+  const type = ALLOWED_UPLOADS[extOf(att.file)] || 'application/octet-stream'
+  const inline = type.startsWith('image/') || type === 'application/pdf'
+  res.setHeader('Content-Type', type)
+  res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox")
+  res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(att.name)}`)
+  res.setHeader('Cache-Control', 'private, max-age=3600')
+  res.sendFile(path.join(config.uploadsDir, issue.id, att.file), (err) => { if (err && !res.headersSent) res.status(404).end() })
+}
 
 function cleanupTmp(files) {
   for (const f of files || []) fs.rm(f.path, { force: true }, () => {})
@@ -178,9 +206,31 @@ apiV1.put('/issues/:id', async (req, res) => {
   }
 })
 
+// Attach files: multipart `files`. Only the frontmatter's attachments change.
+apiV1.post('/issues/:id/files', upload.array('files'), async (req, res) => {
+  const files = req.files || []
+  try {
+    if (!issues.get(req.params.id)) return res.status(404).json({ error: 'Not found' })
+    if (!files.length) return res.status(400).json({ error: 'No files' })
+    const attachments = describeFiles(files)
+    storeFiles(req.params.id, files, attachments)
+    await issues.addAttachments(req.params.id, attachments)
+    res.status(201).json(issues.raw(req.params.id))
+  } finally {
+    cleanupTmp(files)
+  }
+})
+
+apiV1.get('/issues/:id/files/:file', (req, res) => {
+  const issue = issues.get(req.params.id)
+  if (!issue) return res.status(404).end()
+  sendAttachment(res, issue, req.params.file)
+})
+
 apiV1.use((req, res) => res.status(404).json({ error: 'Not found' }))
 // eslint-disable-next-line no-unused-vars
 apiV1.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError) return res.status(400).json({ error: `Upload error: ${err.message}` })
   if (err.status && err.status < 500) return res.status(err.status).json({ error: err.message })
   console.error(err)
   res.status(500).json({ error: 'Internal error' })
@@ -286,9 +336,9 @@ app.get('/api/issues/:id', requireUser, async (req, res) => {
       ...withAuthorName(rest),
       title: ca.title,
       canEdit: canEdit(req.user, issue),
-      html: markdown.parse(ca.body),
+      html: markdown.parse(inlineAttachments(issue, ca.body)),
       translated: ca.translated,
-      ...(ca.translated && isAdmin(req.user) ? { original: { title: issue.title, html: markdown.parse(body) } } : {}),
+      ...(ca.translated && isAdmin(req.user) ? { original: { title: issue.title, html: markdown.parse(inlineAttachments(issue, body)) } } : {}),
     },
   })
 })
@@ -377,15 +427,7 @@ app.patch('/api/issues/:id', requireUser, async (req, res) => {
 app.get('/api/issues/:id/files/:file', requireUser, (req, res) => {
   const issue = issues.get(req.params.id)
   if (!issue || !canSee(req.user, issue)) return res.status(404).end()
-  const att = issue.attachments.find((a) => a.file === req.params.file)
-  if (!att || !/^[a-f0-9]{24}\.[a-z0-9]+$/.test(att.file)) return res.status(404).end()
-  const type = ALLOWED_UPLOADS[extOf(att.file)] || 'application/octet-stream'
-  const inline = type.startsWith('image/') || type === 'application/pdf'
-  res.setHeader('Content-Type', type)
-  res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox")
-  res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(att.name)}`)
-  res.setHeader('Cache-Control', 'private, max-age=3600')
-  res.sendFile(path.join(config.uploadsDir, issue.id, att.file), (err) => { if (err && !res.headersSent) res.status(404).end() })
+  sendAttachment(res, issue, req.params.file)
 })
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }))

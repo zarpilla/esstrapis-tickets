@@ -530,6 +530,42 @@ describe('tickets app', () => {
     }
   })
 
+  test('the API attaches files, and images named in the Markdown show inline', async () => {
+    const KEY = process.env.TICKETS_API_KEY
+    const auth = { Authorization: `Bearer ${KEY}` }
+    const form = (...files) => {
+      const f = new FormData()
+      for (const [name, content, type] of files) f.append('files', new Blob([content], { type }), name)
+      return f
+    }
+    const current = await (await fetch(`${base}/api/v1/issues/900`, { headers: auth })).json()
+    const withImages = current.markdown.replace('The PDF has no IRPF.', 'The PDF has no IRPF.\n\n![before](../img/900/before%20fix.png)\n\n![remote](https://evil.example/x.png)')
+    let res = await fetch(`${base}/api/v1/issues/900`, { method: 'PUT', headers: { ...auth, 'Content-Type': 'application/json', 'If-Match': current.hash }, body: JSON.stringify({ markdown: withImages }) })
+    assert.strictEqual(res.status, 200)
+
+    assert.strictEqual((await fetch(`${base}/api/v1/issues/900/files`, { method: 'POST', body: form(['x.png', 'P', 'image/png']) })).status, 401)
+    assert.strictEqual((await fetch(`${base}/api/v1/issues/900/files`, { method: 'POST', headers: auth, body: form(['evil.html', '<script>', 'text/html']) })).status, 400)
+    assert.strictEqual((await fetch(`${base}/api/v1/issues/999/files`, { method: 'POST', headers: auth, body: form(['x.png', 'P', 'image/png']) })).status, 404)
+    res = await fetch(`${base}/api/v1/issues/900/files`, { method: 'POST', headers: auth, body: form(['before fix.png', 'PNGBEFORE', 'image/png'], ['notes.txt', 'n', 'text/plain']) })
+    assert.strictEqual(res.status, 201)
+    const issue = await res.json()
+    assert.deepStrictEqual(issue.attachments.map((a) => a.name), ['before fix.png', 'notes.txt'])
+    assert.match(issue.markdown, /\nattachments:\n  - file: [a-f0-9]{24}\.png\n    name: before fix.png\n/)
+    assert.ok(issue.markdown.includes('![before](../img/900/before%20fix.png)'))
+    assert.deepStrictEqual(fs.readdirSync(path.join(dataDir, 'tmp')), [])
+
+    const png = issue.attachments[0].file
+    const download = await fetch(`${base}/api/v1/issues/900/files/${png}`, { headers: auth })
+    assert.strictEqual(await download.text(), 'PNGBEFORE')
+    assert.strictEqual((await fetch(`${base}/api/v1/issues/900/files/${png}`)).status, 401)
+
+    // On the site the named image shows inline; a remote one stays as text.
+    const admin = await login('admin', 'admin-password-1')
+    const { issue: shown } = await (await call(admin, '/issues/900')).json()
+    assert.ok(shown.html.includes(`<img src="/api/issues/900/files/${png}" alt="before" loading="lazy">`))
+    assert.ok(!shown.html.includes('evil.example'))
+  })
+
   test('an unreachable SMTP server is checked once, then skipped without blocking requests', async () => {
     const mailer = require('../lib/mailer')
     let verifies = 0
