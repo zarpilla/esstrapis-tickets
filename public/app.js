@@ -112,7 +112,7 @@ async function renderHome() {
   draw()
 }
 
-async function renderIssue(id) {
+async function renderIssue(id, aiReply) {
   mount('tpl-issue')
   const { issue } = await api(`/issues/${encodeURIComponent(id)}`)
   document.title = `#${issue.id} ${issue.title} · Tiquets`
@@ -142,6 +142,30 @@ async function renderIssue(id) {
       msg.textContent = err.message
       select.value = issue.status
   select.className = `status-select s-${issue.status}`
+    }
+  })
+
+  const replyBox = view.querySelector('.ai-reply')
+  if (aiReply) {
+    replyBox.hidden = false
+    replyBox.textContent = aiReply
+  }
+
+  const form = document.getElementById('followup-form')
+  form.querySelector('input[type=file]').accept = session.upload.extensions.join(',')
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    showError(form)
+    const button = form.querySelector('button')
+    button.disabled = true
+    button.textContent = 'Actualitzant el tiquet…'
+    try {
+      const { ai, reply } = await api(`/issues/${issue.id}/messages`, { method: 'POST', body: new FormData(form) })
+      await renderIssue(id, ai ? reply : "L'IA no està disponible ara mateix: el missatge s'ha afegit al tiquet sense reescriure'l.")
+    } catch (err) {
+      showError(form, err)
+      button.disabled = false
+      button.textContent = 'Envia'
     }
   })
 

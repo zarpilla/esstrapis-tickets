@@ -161,34 +161,64 @@ app.get('/api/issues/:id', requireUser, (req, res) => {
   res.json({ issue: { ...withAuthorName(rest), html: markdown.parse(body) } })
 })
 
-// Caps AI calls per user, so a leaked account can't burn the z.ai quota.
+// Caps AI calls per user (new tickets + follow-ups), so a leaked account can't burn the z.ai quota.
 const created = new Map()
-const MAX_ISSUES_PER_HOUR = 20
+const MAX_ISSUES_PER_HOUR = 30
 function creationAllowed(req, res, next) {
   const recent = (created.get(req.user.username) || []).filter((t) => t > Date.now() - 3600 * 1000)
-  if (recent.length >= MAX_ISSUES_PER_HOUR) return res.status(429).json({ error: 'Too many tickets in the last hour' })
+  if (recent.length >= MAX_ISSUES_PER_HOUR) return res.status(429).json({ error: 'Too many AI requests in the last hour. Try again later.' })
   created.set(req.user.username, [...recent, Date.now()])
   next()
+}
+
+function readText(req) {
+  const text = typeof req.body.text === 'string' ? req.body.text.trim() : ''
+  if (text.length < 2 || text.length > 20000) throw Object.assign(new Error('Write between 2 and 20000 characters'), { status: 400 })
+  return text
+}
+
+function describeFiles(files) {
+  return files.map((f) => ({
+    file: `${crypto.randomBytes(12).toString('hex')}${extOf(f.originalname)}`,
+    name: displayName(f.originalname),
+    size: f.size,
+  }))
+}
+
+function storeFiles(id, files, attachments) {
+  const dir = path.join(config.uploadsDir, id)
+  fs.mkdirSync(dir, { recursive: true })
+  files.forEach((f, i) => fs.renameSync(f.path, path.join(dir, attachments[i].file)))
 }
 
 app.post('/api/issues', requireUser, creationAllowed, upload.array('files'), async (req, res) => {
   const files = req.files || []
   try {
-    const text = typeof req.body.text === 'string' ? req.body.text.trim() : ''
-    if (text.length < 10 || text.length > 20000) return res.status(400).json({ error: 'Write between 10 and 20000 characters' })
-
+    const text = readText(req)
+    if (text.length < 10) return res.status(400).json({ error: 'Write at least 10 characters' })
     const draft = await ai.draftIssue(text, files)
-    const attachments = files.map((f) => ({
-      file: `${crypto.randomBytes(12).toString('hex')}${extOf(f.originalname)}`,
-      name: displayName(f.originalname),
-      size: f.size,
-    }))
+    const attachments = describeFiles(files)
     const id = await issues.create({ draft, originalText: text, author: req.user, attachments })
-
-    const dir = path.join(config.uploadsDir, id)
-    fs.mkdirSync(dir, { recursive: true })
-    files.forEach((f, i) => fs.renameSync(f.path, path.join(dir, attachments[i].file)))
+    storeFiles(id, files, attachments)
     res.status(201).json({ id, ai: draft.ai })
+  } finally {
+    cleanupTmp(files)
+  }
+})
+
+// Follow-up: the user adds information; the AI rewrites the ticket and replies.
+app.post('/api/issues/:id/messages', requireUser, creationAllowed, upload.array('files'), async (req, res) => {
+  const files = req.files || []
+  try {
+    const issue = issues.get(req.params.id)
+    if (!issue || !canSee(req.user, issue)) return res.status(404).json({ error: 'Not found' })
+    const text = readText(req)
+    const current = `Type: ${issue.type} · Priority: ${issue.priority} · Project: ${issue.project || '-'}\n\n${issue.body}`
+    const { draft, reply } = await ai.reviseIssue(current, text, files)
+    const attachments = describeFiles(files)
+    await issues.addFollowUp(issue.id, { draft, message: text, reply, author: req.user, attachments })
+    storeFiles(issue.id, files, attachments)
+    res.status(201).json({ ai: Boolean(draft), reply })
   } finally {
     cleanupTmp(files)
   }

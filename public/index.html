@@ -87,6 +87,20 @@
         <ul class="files"></ul>
       </div>
     </section>
+
+    <section class="card">
+      <h2>Afegeix informació</h2>
+      <p class="muted">Respon les preguntes o explica més detalls. L'IA actualitzarà el tiquet i et contestarà.</p>
+      <p class="ai-reply" hidden></p>
+      <form id="followup-form">
+        <textarea name="text" rows="4" maxlength="20000" required placeholder="Ex.: Passa a totes les pàgines, des d'ahir al matí..."></textarea>
+        <div class="row">
+          <input type="file" name="files" multiple>
+          <button type="submit">Envia</button>
+        </div>
+        <p class="error" hidden></p>
+      </form>
+    </section>
   </template>
 </body>
 </html>

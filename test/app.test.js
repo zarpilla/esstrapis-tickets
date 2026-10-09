@@ -185,4 +185,63 @@ describe('tickets app', () => {
     require('../lib/users').upsert({ username: 'pere', password: 'pere-password-2' })
     assert.strictEqual((await call(cookie, '/me')).status, 401)
   })
+
+  test('a follow-up lets the AI rewrite the ticket, keeping manual notes and ticked criteria', async () => {
+    const file = path.join(dataDir, 'issues', '001-add-excel-export-to-partners.md')
+    // A developer ticks a criterion and adds a note by hand.
+    fs.writeFileSync(file, fs.readFileSync(file, 'utf8')
+      .replace('- [ ] The Sòcies page has an export button', '- [x] The Sòcies page has an export button')
+      .replace('- [ ] Question: Which columns', '- Dev note: reuse ContactsTable export\n- [ ] Question: Which columns'))
+
+    aiReply = JSON.stringify({
+      title: 'Add Excel export with all columns to the Sòcies page',
+      type: 'improvement',
+      priority: 'high',
+      project: ['projectes-front'],
+      description: 'Users cannot export the member list. They need every column.',
+      acceptance_criteria: ['The Sòcies page has an export button', 'The export includes all columns', 'Covered by a test (whatever)'],
+      questions: [],
+      reply: "He afegit que cal exportar totes les columnes.",
+    })
+    const anna = await login('anna', 'anna-password-1')
+    const form = newIssueForm('Totes les columnes, si us plau', [['extra.png', 'PNG2', 'image/png']])
+    const res = await call(anna, '/issues/001/messages', { method: 'POST', body: form })
+    assert.strictEqual(res.status, 201)
+    assert.deepStrictEqual(await res.json(), { ai: true, reply: 'He afegit que cal exportar totes les columnes.' })
+    assert.match(aiRequest.body.messages[1].content, /Current issue:[\s\S]*# 001 — Add Excel export[\s\S]*New message from the user:[\s\S]*Totes les columnes/)
+
+    const md = fs.readFileSync(file, 'utf8')
+    assert.match(md, /\ntitle: Add Excel export with all columns to the Sòcies page\n/)
+    assert.match(md, /\npriority: high\n/)
+    assert.match(md, /# 001 — Add Excel export with all columns to the Sòcies page/)
+    assert.match(md, /- \[x\] The Sòcies page has an export button\n- \[ \] The export includes all columns\n- \[ \] Covered by a test \(unit/)
+    assert.strictEqual(md.match(/Covered by a test/g).length, 1)
+    assert.match(md, /- Dev note: reuse ContactsTable export/)
+    assert.doesNotMatch(md, /Question: Which columns/)
+    assert.match(md, /Attachments: `captura.png`, `notes.txt`, `extra.png`/)
+    assert.match(md, /## Original report\n> Voldria exportar/)
+    assert.match(md, /## Conversation\n\*\*[\d-]+ · Anna \(anna\):\*\*\n> Totes les columnes, si us plau\n\n\*\*[\d-]+ · AI:\*\*\n> He afegit/)
+    assert.match(md, /## Conversation[\s\S]*## Log\n[\s\S]*follow-up from anna \(AI updated the ticket\)\n$/)
+
+    const { issue } = await (await call(anna, '/issues/001')).json()
+    assert.strictEqual(issue.attachments.length, 3)
+    assert.strictEqual(await (await call(anna, `/issues/001/files/${issue.attachments[2].file}`)).text(), 'PNG2')
+  })
+
+  test('a follow-up is still recorded when the AI fails, and others cannot post', async () => {
+    aiReply = null
+    const anna = await login('anna', 'anna-password-1')
+    const before = fs.readFileSync(path.join(dataDir, 'issues', '001-add-excel-export-to-partners.md'), 'utf8')
+    const res = await call(anna, '/issues/001/messages', { method: 'POST', body: newIssueForm('I també el NIF') })
+    assert.deepStrictEqual(await res.json(), { ai: false, reply: '' })
+    const md = fs.readFileSync(path.join(dataDir, 'issues', '001-add-excel-export-to-partners.md'), 'utf8')
+    assert.strictEqual(md.split('## Conversation')[0].replace(/updated: .*/, ''), before.split('## Conversation')[0].replace(/updated: .*/, ''))
+    assert.match(md, /> I també el NIF\n\n## Log/)
+    assert.match(md, /follow-up from anna \(AI unavailable, ticket not rewritten\)\n$/)
+
+    const admin = await login('admin', 'admin-password-1')
+    assert.strictEqual((await call(admin, '/issues/001/messages', { method: 'POST', body: newIssueForm('Admin note') })).status, 201)
+    const pere = await login('pere', 'pere-password-2')
+    assert.strictEqual((await call(pere, '/issues/001/messages', { method: 'POST', body: newIssueForm('Hijack') })).status, 404)
+  })
 })

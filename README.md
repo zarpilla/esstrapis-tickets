@@ -4,6 +4,7 @@ A small website where ESSTRAPIS users report bugs, improvements and suggestions.
 
 - The user writes in a textarea, in their own words, and can attach screenshots and documents.
 - A z.ai GLM model turns the text into an issue in the same format as `projectes/issues`: a `NNN-slug.md` file with YAML frontmatter, Description, Acceptance criteria, Questions and a Log. The original text is kept under "Original report". If the AI call fails, the issue is still created from the raw text.
+- On the ticket page, the user can add more information or answer the open questions, with new attachments if needed. The AI rewrites the generated sections (Description, Steps, Expected vs actual, Acceptance criteria, Notes) and replies in the user's language. It keeps hand-written notes, ticked criteria and any section added by hand. Messages and replies are kept under "Conversation".
 - Users see their own tickets and can change their status. Admins see every ticket and can change any status. Each status change is logged in the file.
 
 There is no database: issues are Markdown files, users are a JSON file, and attachments sit on disk.
@@ -46,7 +47,7 @@ npm run user -- list
 - CSRF protection: every write needs the `X-Requested-With: tickets` header and a same-origin `Origin`.
 - Strict CSP with no inline scripts. Issue Markdown is rendered on the server with raw HTML escaped and only `http(s)`/`mailto` links allowed.
 - Uploads: extension allowlist (images, PDF, text, Office/LibreOffice; no HTML or SVG), size and count limits, and random file names on disk. Files are served only to the ticket's author or an admin, with `nosniff` and a sandboxing CSP. Non-image and non-PDF files are served as downloads.
-- The text sent to the AI is treated as data, and the model output is validated field by field. Each user can create at most 20 tickets per hour, to protect the API quota.
+- The text sent to the AI is treated as data, and the model output is validated field by field. Each user can make at most 30 AI requests (new tickets and follow-ups) per hour, to protect the API quota.
 
 ## Deploy on the VPS
 
