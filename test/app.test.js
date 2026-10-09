@@ -371,4 +371,31 @@ describe('tickets app', () => {
     // A fresh token for the same user works again.
     assert.strictEqual((await ssoGet('coop-a', tokenFor(coop, 'nuria@coop-a.cat'))).status, 303)
   })
+
+  test('an unreachable SMTP server is checked once, then skipped without blocking requests', async () => {
+    const mailer = require('../lib/mailer')
+    let verifies = 0
+    let sends = 0
+    mailer.setTransport({
+      verify: async () => { verifies++; throw new Error('getaddrinfo ENOTFOUND smtp.invalid') },
+      sendMail: async () => { sends++ },
+    })
+    try {
+      const boss = await login('boss@coop.cat', 'boss-password-1')
+      const { issues: list } = await (await call(boss, '/issues')).json()
+      const id = list.find((i) => i.author === 'marta@coop.cat').id
+      for (const status of ['blocked', 'review', 'todo']) {
+        const started = Date.now()
+        assert.strictEqual((await call(boss, `/issues/${id}`, { method: 'PATCH', json: { status } })).status, 200)
+        assert.ok(Date.now() - started < 1000)
+      }
+      await new Promise((r) => setTimeout(r, 50))
+      assert.strictEqual(verifies, 1)
+      assert.strictEqual(sends, 0)
+      assert.strictEqual(await mailer.ready(), false)
+      assert.strictEqual(verifies, 1)
+    } finally {
+      mailer.setTransport(null)
+    }
+  })
 })

@@ -308,7 +308,8 @@ app.use((err, req, res, next) => {
 if (require.main === module) {
   app.listen(config.port, config.host, () => {
     console.log(`Tickets listening on http://${config.host}:${config.port}`)
-    console.log(mailer.enabled() ? `Email notifications on (SMTP ${config.smtp.host})` : 'Email notifications off (no SMTP_HOST)')
+    if (!mailer.enabled()) console.log('Email notifications off (no SMTP_HOST)')
+    else mailer.ready().then((ok) => ok && console.log(`Email notifications on (SMTP ${config.smtp.host} verified)`))
   })
 }
 
