@@ -37,6 +37,8 @@ function el(tag, attrs = {}, ...children) {
   return node
 }
 
+const badge = (prefix, value) => el('span', { class: `badge ${prefix}-${value}` }, label(value))
+
 function showError(form, err) {
   const p = form.querySelector('.error')
   p.textContent = err ? err.message : ''
@@ -84,20 +86,23 @@ async function renderHome() {
   })
 
   const filter = document.getElementById('filter')
+  filter.append(el('optgroup', { label: 'Per estat' }, ...session.statuses.map((s) => el('option', { value: `status:${s}` }, label(s)))))
   try { filter.value = localStorage.getItem('filter') || 'open' } catch { /* storage blocked */ }
+  if (!filter.value) filter.value = 'open'
   if (session.user.role !== 'admin') view.querySelectorAll('.col-author').forEach((th) => th.remove())
 
   const { issues } = await api('/issues')
   const draw = () => {
     try { localStorage.setItem('filter', filter.value) } catch { /* storage blocked */ }
     const isClosed = (i) => session.closed.includes(i.status)
-    const shown = issues.filter((i) => filter.value === 'all' || (filter.value === 'closed') === isClosed(i))
+    const f = filter.value
+    const shown = issues.filter((i) => f === 'all' || (f.startsWith('status:') ? i.status === f.slice(7) : (f === 'closed') === isClosed(i)))
     document.getElementById('list').replaceChildren(...shown.map((i) => el('tr', {},
       el('td', {}, i.id),
       el('td', {}, el('a', { href: `#/issue/${i.id}` }, i.title || '(sense títol)')),
-      el('td', {}, label(i.type)),
+      el('td', {}, badge('t', i.type)),
       el('td', {}, el('span', { class: `status s-${i.status}` }, label(i.status))),
-      el('td', {}, label(i.priority)),
+      el('td', {}, badge('p', i.priority)),
       session.user.role === 'admin' ? el('td', {}, i.authorName) : null,
       el('td', { class: 'nowrap' }, i.updated || ''),
     )))
@@ -114,6 +119,8 @@ async function renderIssue(id) {
   const set = (k, text) => { view.querySelector(`[data-k="${k}"]`).textContent = text }
   set('type', label(issue.type))
   set('priority', `Prioritat ${label(issue.priority).toLowerCase()}`)
+  view.querySelector('[data-k="type"]').classList.add(`t-${issue.type}`)
+  view.querySelector('[data-k="priority"]').classList.add(`p-${issue.priority}`)
   set('project', issue.project || '')
   set('author', `per ${issue.authorName} · ${issue.created}`)
 
@@ -123,6 +130,7 @@ async function renderIssue(id) {
   const select = document.getElementById('status')
   select.replaceChildren(...session.statuses.map((s) => el('option', { value: s }, label(s))))
   select.value = issue.status
+  select.className = `status-select s-${issue.status}`
   const msg = document.getElementById('status-msg')
   select.addEventListener('change', async () => {
     msg.textContent = 'Desant…'
@@ -133,6 +141,7 @@ async function renderIssue(id) {
     } catch (err) {
       msg.textContent = err.message
       select.value = issue.status
+  select.className = `status-select s-${issue.status}`
     }
   })
 
