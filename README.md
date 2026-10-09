@@ -66,9 +66,9 @@ Anyone holding the shared secret can sign in as any SSO user of any instance, so
 
 The ESSTRAPIS side lives in `projectes-v5/src/services/tickets-sso.js` (`GET /api/me/tickets-login`).
 
-## API for the team (projectes/issues sync)
+## API for the team (issue sync)
 
-The team's issues in `projectes/issues` live on this site too, so a fix done locally shows up for the users who reported it. `/api/v1` reads and writes tickets as whole `.md` files, in the same format on both sides. It is off until `TICKETS_API_KEY` (32+ chars, `openssl rand -base64 48`) is set. Use a different key from `TICKETS_SSO_KEY`: this one reads and changes every ticket of every instance, so it stays with the team.
+The team's own issues live on this site too, next to the tickets users report, so a fix shows up for the users who reported it. `/api/v1` reads and writes tickets as whole `.md` files, in the same format on both sides. It is off until `TICKETS_API_KEY` (32+ chars, `openssl rand -base64 48`) is set. Use a different key from `TICKETS_SSO_KEY`: this one reads and changes every ticket of every instance, so it stays with the team.
 
 ```
 Authorization: Bearer <TICKETS_API_KEY>
@@ -85,7 +85,7 @@ PUT  /api/v1/issues/:id     { markdown, slug? } → create or replace ticket :id
 - A status or visibility change through `PUT` emails the author and admins, as on the site. Creating doesn't, so a bulk import is silent.
 - Wrong keys count towards the same per-IP lockout as logins.
 
-The client is `projectes/.claude/skills/issue/tiquets.mjs` (`status`, `push`, `pull`, `create`, `show`).
+The client is `projectes/.claude/skills/issue/tiquets.mjs` (`status`, `push`, `pull`, `create`, `show`). It mirrors the site into this repo's `data/issues` (gitignored), so `npm start` locally shows the same tickets, and keeps the last synced hashes in `data/.tiquets-sync.json`.
 
 ## Docker
 
