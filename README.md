@@ -80,6 +80,21 @@ docker compose -f deploy/docker-compose.yml exec tickets npm run user -- add adm
 
 nginx (`deploy/nginx.conf`) stays in front, proxying to `127.0.0.1:3000`. Back up the `tickets-data` volume.
 
+### Automatic deploy
+
+After a push to `main` publishes the image, the `deploy` job connects to the server over SSH and runs `deploy/deploy.sh`. The script pulls the image, restarts the container, waits until it's healthy, and fails the job if it isn't. The job runs in the `production` environment, so you can add required reviewers there.
+
+One-time setup:
+
+```bash
+ssh-keygen -t ed25519 -N '' -C github-deploy-tickets -f deploy_key   # locally
+# On the server: copy deploy/deploy.sh next to docker-compose.yml, then add to ~/.ssh/authorized_keys:
+#   command="/var/www/tiquets/deploy.sh",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty ssh-ed25519 AAAA... github-deploy-tickets
+ssh-keyscan -t ed25519 <server-ip>                                    # → DEPLOY_SSH_KNOWN_HOSTS
+```
+
+Then set these repository secrets: `DEPLOY_SSH_KEY` (the contents of `deploy_key`), `DEPLOY_SSH_KNOWN_HOSTS` and `DEPLOY_SSH_TARGET` (`user@host`). Delete the local key files afterwards. With the forced command, the key can only run the deploy script, not open a shell.
+
 ## Deploy on the VPS without Docker
 
 ```bash
