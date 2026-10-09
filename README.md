@@ -85,7 +85,22 @@ Build the URL on the server, when the user clicks the link (e.g. an endpoint tha
 - Uploads: extension allowlist (images, PDF, text, Office/LibreOffice; no HTML or SVG), size and count limits, and random file names on disk. Files are served only to the ticket's author or an admin, with `nosniff` and a sandboxing CSP. Non-image and non-PDF files are served as downloads.
 - The text sent to the AI is treated as data, and the model output is validated field by field. Each user can make at most 30 AI requests (new tickets and follow-ups) per hour, to protect the API quota.
 
-## Deploy on the VPS
+## Docker
+
+GitHub Actions (`.github/workflows/docker.yml`) runs the tests and builds the image on every push and pull request. Pushes to `main` publish `<DOCKERHUB_USERNAME>/esstrapis-tickets:latest` and `:sha-<commit>` to Docker Hub. Tags like `v1.2.3` also publish `:1.2.3` and `:1.2`. It uses the repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`. Pull requests only build, without pushing.
+
+The image (Node 24, Alpine) runs as the `node` user, listens on port 3000, and keeps everything in the `/data` volume. Run it with `deploy/docker-compose.yml`:
+
+```bash
+cp .env.example deploy/.env && nano deploy/.env       # SESSION_SECRET, ZAI_API_KEY, SMTP_*, PUBLIC_URL
+DOCKERHUB_USERNAME=<user> docker compose -f deploy/docker-compose.yml up -d
+docker compose -f deploy/docker-compose.yml exec tickets npm run user -- add admin@example.org "Admin" admin
+docker compose -f deploy/docker-compose.yml exec tickets npm run tenant -- add "<instance name>"
+```
+
+nginx (`deploy/nginx.conf`) stays in front, proxying to `127.0.0.1:3000`. Back up the `tickets-data` volume.
+
+## Deploy on the VPS without Docker
 
 ```bash
 sudo useradd --system --home /opt/esstrapis-tickets tickets

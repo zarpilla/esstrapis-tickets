@@ -1,0 +1,22 @@
+# Example for the VPS: docker compose -f deploy/docker-compose.yml up -d
+# Put the settings in ./.env next to this file (see .env.example). HOST, PORT and
+# DATA_DIR are fixed below, so values copied from .env.example can't override them.
+# Manage users and tenants inside the container, e.g.:
+#   docker compose -f deploy/docker-compose.yml exec tickets npm run user -- add admin@example.org "Admin" admin
+services:
+  tickets:
+    image: ${DOCKERHUB_USERNAME:?set DOCKERHUB_USERNAME}/esstrapis-tickets:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: "3000"
+      DATA_DIR: /data
+      TRUST_PROXY: "1"
+    ports:
+      - "127.0.0.1:3000:3000"   # nginx in front (deploy/nginx.conf)
+    volumes:
+      - tickets-data:/data
+
+volumes:
+  tickets-data:

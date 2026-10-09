@@ -1,0 +1,13 @@
+# Only what the image needs; never secrets or tenant data.
+.git
+.github
+node_modules
+data
+.env
+.env.*
+!.env.example
+test
+deploy
+*.md
+Dockerfile
+.dockerignore

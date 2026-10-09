@@ -12,7 +12,7 @@
     "start": "node server.js",
     "user": "node scripts/user.js",
     "tenant": "node scripts/tenant.js",
-    "test": "node --test test/"
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "express": "^5.2.1",
