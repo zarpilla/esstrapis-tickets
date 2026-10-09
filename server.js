@@ -19,6 +19,11 @@ if (config.ssoKey && config.ssoKey.length < 32) {
   process.exit(1)
 }
 
+if (config.apiKey && config.apiKey.length < 32) {
+  console.error('TICKETS_API_KEY must have 32+ chars. Generate one with: openssl rand -base64 48')
+  process.exit(1)
+}
+
 if (!config.sessionSecret || config.sessionSecret.length < 32) {
   console.error('SESSION_SECRET must be set (32+ chars). Generate one with: openssl rand -hex 32')
   process.exit(1)
@@ -112,6 +117,77 @@ app.use((req, res, next) => {
 })
 
 app.use(express.static(path.join(__dirname, 'public'), { index: 'index.html' }))
+// The same issue with its Catalan title, for the emails.
+const inCatalan = (issue, ca) => issue && ca && { ...issue, title: ca.title }
+
+// --- API for the team's tooling (projectes/issues sync) ------------------------
+// Authorization: Bearer <TICKETS_API_KEY>. Tickets travel as whole .md files, the
+// same format as projectes/issues. Mounted before the session/CSRF middleware: a
+// browser never sends this header on its own.
+const sameSecret = (a, b) => {
+  const h = (s) => crypto.createHash('sha256').update(String(s)).digest()
+  return crypto.timingSafeEqual(h(a), h(b))
+}
+
+const apiV1 = express.Router()
+apiV1.use((req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store')
+  const key = `api|${req.ip}`
+  if (loginBlocked(key)) return res.status(429).json({ error: 'Too many attempts. Try again later.' })
+  const m = /^Bearer (\S+)$/.exec(req.headers.authorization || '')
+  if (!config.apiKey || !m || !sameSecret(m[1], config.apiKey)) {
+    loginFailed(key)
+    return res.status(401).json({ error: config.apiKey ? 'Invalid API key' : 'API off (no TICKETS_API_KEY)' })
+  }
+  next()
+})
+apiV1.use(express.json({ limit: '500kb' }))
+
+const slugOf = (body) => (typeof body.slug === 'string' ? body.slug : undefined)
+
+// Every ticket, private ones included, with the hash of its file.
+apiV1.get('/issues', (req, res) => {
+  res.json({ issues: issues.list().map((i) => ({ ...i, ...issues.raw(i.id), markdown: undefined })) })
+})
+
+apiV1.get('/issues/:id', (req, res) => {
+  const issue = issues.raw(req.params.id)
+  if (!issue) return res.status(404).json({ error: 'Not found' })
+  res.json(issue)
+})
+
+// New ticket with the next free id: { markdown, slug? }. No emails.
+apiV1.post('/issues', async (req, res) => {
+  const id = await issues.createRaw((req.body || {}).markdown, { slug: slugOf(req.body || {}) })
+  res.status(201).json(issues.raw(id))
+})
+
+// Create or replace ticket :id: { markdown, slug? }. Send If-Match: <hash> from the last
+// read, or If-None-Match: * to only create. A status or visibility change emails the
+// author and admins, as when it's changed on the site.
+apiV1.put('/issues/:id', async (req, res) => {
+  const before = await issues.putRaw(req.params.id, (req.body || {}).markdown, {
+    slug: slugOf(req.body || {}),
+    ifMatch: req.headers['if-match'],
+    ifNoneMatch: req.headers['if-none-match'],
+  })
+  res.status(before ? 200 : 201).json(issues.raw(req.params.id))
+  if (before) {
+    const after = issues.get(req.params.id)
+    mailer.changed(inCatalan(before, translations.cached(before)), inCatalan(after, translations.cached(after)), API_ACTOR)
+  }
+})
+
+apiV1.use((req, res) => res.status(404).json({ error: 'Not found' }))
+// eslint-disable-next-line no-unused-vars
+apiV1.use((err, req, res, next) => {
+  if (err.status && err.status < 500) return res.status(err.status).json({ error: err.message })
+  console.error(err)
+  res.status(500).json({ error: 'Internal error' })
+})
+
+app.use('/api/v1', apiV1)
+
 app.use('/api', express.json({ limit: '20kb' }))
 app.use('/api', sessionMiddleware)
 
@@ -135,9 +211,12 @@ const isAdmin = (user) => user.role === 'admin'
 const canEdit = (user, issue) => isAdmin(user) || issue.author === user.username
 const canSee = (user, issue) => canEdit(user, issue) || issue.public === true
 
+// Who changes tickets through /api/v1 (in emails, and as the author of the team's own issues).
+const API_ACTOR = { username: 'api', name: 'Equip ESSTRAPIS' }
+
 function withAuthorName(issue) {
   const author = users.find(issue.author)
-  return { ...issue, authorName: author ? author.name : issue.author }
+  return { ...issue, authorName: author ? author.name : issue.author || API_ACTOR.name }
 }
 
 app.post('/api/login', (req, res) => {
@@ -213,9 +292,6 @@ app.get('/api/issues/:id', requireUser, async (req, res) => {
     },
   })
 })
-
-// The same issue with its Catalan title, for the emails.
-const inCatalan = (issue, ca) => issue && ca && { ...issue, title: ca.title }
 
 // Caps AI calls per user (new tickets + follow-ups), so a leaked account can't burn the z.ai quota.
 const created = new Map()

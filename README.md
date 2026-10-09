@@ -66,6 +66,27 @@ Anyone holding the shared secret can sign in as any SSO user of any instance, so
 
 The ESSTRAPIS side lives in `projectes-v5/src/services/tickets-sso.js` (`GET /api/me/tickets-login`).
 
+## API for the team (projectes/issues sync)
+
+The team's issues in `projectes/issues` live on this site too, so a fix done locally shows up for the users who reported it. `/api/v1` reads and writes tickets as whole `.md` files, in the same format on both sides. It is off until `TICKETS_API_KEY` (32+ chars, `openssl rand -base64 48`) is set. Use a different key from `TICKETS_SSO_KEY`: this one reads and changes every ticket of every instance, so it stays with the team.
+
+```
+Authorization: Bearer <TICKETS_API_KEY>
+
+GET  /api/v1/issues         every ticket (private ones too): summary + file + hash
+GET  /api/v1/issues/:id     { id, file, hash, markdown }
+POST /api/v1/issues         { markdown, slug? } → new ticket with the next free id
+PUT  /api/v1/issues/:id     { markdown, slug? } → create or replace ticket :id
+                            If-Match: <hash> (412 if it changed since) · If-None-Match: * (only create)
+```
+
+- The frontmatter must have `title`, `type` (bug · improvement · suggestion), `status`, `priority`, and dates as `YYYY-MM-DD`. `public` defaults to false. The `id` field and the `# NNN —` heading are rewritten to the ticket's id.
+- `author`, `tenant` and `attachments` belong to the site. They are kept from the stored file, whatever the request says. Tickets created through the API have no author: only admins see them, as written by "Equip ESSTRAPIS".
+- A status or visibility change through `PUT` emails the author and admins, as on the site. Creating doesn't, so a bulk import is silent.
+- Wrong keys count towards the same per-IP lockout as logins.
+
+The client is `projectes/.claude/skills/issue/tiquets.mjs` (`status`, `push`, `pull`, `create`, `show`).
+
 ## Docker
 
 GitHub Actions (`.github/workflows/docker.yml`) runs the tests and builds the image on every push and pull request. Pushes to `main` publish `<DOCKERHUB_USERNAME>/esstrapis-tickets:latest` and `:sha-<commit>` to Docker Hub. Tags like `v1.2.3` also publish `:1.2.3` and `:1.2`. It uses the repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`. Pull requests only build, without pushing.
@@ -73,7 +94,7 @@ GitHub Actions (`.github/workflows/docker.yml`) runs the tests and builds the im
 The image (Node 24, Alpine) runs as the `node` user, listens on port 3000, and keeps everything in the `/data` volume. Run it with `deploy/docker-compose.yml`:
 
 ```bash
-cp .env.example deploy/.env && nano deploy/.env       # SESSION_SECRET, TICKETS_SSO_KEY, ZAI_API_KEY, SMTP_*, PUBLIC_URL
+cp .env.example deploy/.env && nano deploy/.env       # SESSION_SECRET, TICKETS_SSO_KEY, TICKETS_API_KEY, ZAI_API_KEY, SMTP_*, PUBLIC_URL
 DOCKERHUB_USERNAME=<user> docker compose -f deploy/docker-compose.yml up -d
 docker compose -f deploy/docker-compose.yml exec tickets npm run user -- add admin@example.org "Admin" admin
 ```

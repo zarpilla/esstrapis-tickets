@@ -11,6 +11,7 @@ process.env.DATA_DIR = dataDir
 process.env.SESSION_SECRET = 'x'.repeat(40)
 process.env.ZAI_API_KEY = 'test-key'
 process.env.TICKETS_SSO_KEY = 'shared-sso-key-for-tests-0123456789abcdef'
+process.env.TICKETS_API_KEY = 'team-api-key-for-tests-0123456789abcdefgh'
 
 let aiReply = null
 let aiRequest = null
@@ -443,6 +444,90 @@ describe('tickets app', () => {
     assert.strictEqual((await ssoGet(tokenFor('nuria@coop-a.cat'))).status, 401)
     tenants.setDisabled('coop-a', false)
     assert.strictEqual((await ssoGet(tokenFor('nuria@coop-a.cat'))).status, 303)
+  })
+
+  test('the API key reads and writes whole issue files, in the projectes/issues format', async () => {
+    const mailer = require('../lib/mailer')
+    const KEY = process.env.TICKETS_API_KEY
+    const api = (p, { key = KEY, method = 'GET', json, headers = {} } = {}) => fetch(`${base}/api/v1${p}`, {
+      method,
+      headers: { ...(key ? { Authorization: `Bearer ${key}` } : {}), ...(json ? { 'Content-Type': 'application/json' } : {}), ...headers },
+      body: json ? JSON.stringify(json) : undefined,
+    })
+    const file = (id, { title = 'Show IRPF in the quote PDF', status = 'todo', type = 'bug', extra = '' } = {}) => [
+      '---', `id: ${id}`, `title: ${title}`, `type: ${type}`, `status: ${status}`, 'priority: medium',
+      'project: projectes-front, projectes-v5        # comment', 'source:', 'created: 2026-10-08', 'updated: 2026-10-09', extra,
+      '---', '', `# ${id} — ${title}`, '', '## Description', 'The PDF has no IRPF.', '', '## Log', '- 2026-10-08 — created', '',
+    ].filter((l, i) => l !== '' || i > 10).join('\n')
+
+    // No key, a wrong key, or a session cookie are not enough.
+    assert.strictEqual((await api('/issues', { key: null })).status, 401)
+    assert.strictEqual((await api('/issues', { key: 'x'.repeat(40) })).status, 401)
+    const admin = await login('admin', 'admin-password-1')
+    assert.strictEqual((await fetch(`${base}/api/v1/issues`, { headers: { Cookie: admin } })).status, 401)
+
+    // PUT with the local id creates the file under that id, keeping the local slug.
+    let res = await api('/issues/900', { method: 'PUT', json: { markdown: file('900'), slug: 'show-irpf-in-quote-pdf' }, headers: { 'If-None-Match': '*' } })
+    assert.strictEqual(res.status, 201)
+    let issue = await res.json()
+    assert.strictEqual(issue.file, '900-show-irpf-in-quote-pdf.md')
+    assert.match(issue.markdown, /^---\nid: 900\ntitle: Show IRPF in the quote PDF\ntype: bug\nstatus: todo\npriority: medium\nproject: projectes-front, projectes-v5\ncreated: 2026-10-08\nupdated: 2026-10-09\npublic: false\n---\n\n# 900 — Show IRPF/)
+    assert.strictEqual((await api('/issues/900', { method: 'PUT', json: { markdown: file('900') }, headers: { 'If-None-Match': '*' } })).status, 412)
+
+    // Only admins see it on the site, as written by the team.
+    const { issues: listed } = await (await call(admin, '/issues')).json()
+    assert.strictEqual(listed.find((i) => i.id === '900').authorName, 'Equip ESSTRAPIS')
+    const anna = await login('anna', 'anna-password-1')
+    assert.strictEqual((await call(anna, '/issues/900')).status, 404)
+
+    // The list has every ticket with its hash; GET returns the file.
+    const { issues: all } = await (await api('/issues')).json()
+    const entry = all.find((i) => i.id === '900')
+    assert.strictEqual(entry.hash, issue.hash)
+    assert.strictEqual(entry.markdown, undefined)
+    assert.ok(all.some((i) => i.author === 'anna'))
+    assert.deepStrictEqual(await (await api('/issues/900')).json(), issue)
+
+    // Fields the site needs are checked.
+    res = await api('/issues/901', { method: 'PUT', json: { markdown: file('901', { type: 'chore', status: 'closed' }) } })
+    assert.strictEqual(res.status, 400)
+    assert.match((await res.json()).error, /type must be one of bug, improvement, suggestion; status must be one of/)
+    assert.strictEqual((await api('/issues/901', { method: 'PUT', json: { markdown: 'just text' } })).status, 400)
+    assert.strictEqual((await api('/issues/901', { method: 'PUT', json: { markdown: '---\ntitle: [unclosed\n---\n' } })).status, 400)
+
+    // POST takes the next free id and rewrites the frontmatter id and the heading.
+    res = await api('/issues', { method: 'POST', json: { markdown: file('NNN', { title: 'A new one', type: 'improvement' }) } })
+    assert.strictEqual(res.status, 201)
+    issue = await res.json()
+    assert.strictEqual(issue.id, '901')
+    assert.strictEqual(issue.file, '901-a-new-one.md')
+    assert.match(issue.markdown, /\nid: 901\n[\s\S]*\n# 901 — A new one\n/)
+
+    // Moving a user's ticket keeps the site's fields, emails the author, and needs the last hash.
+    const sent = []
+    mailer.setTransport({ sendMail: async (m) => { sent.push(m) } })
+    try {
+      const { issues: mine } = await (await api('/issues')).json()
+      const marta = mine.find((i) => i.author === 'marta@coop.cat')
+      const before = await (await api(`/issues/${marta.id}`)).json()
+      const closed = before.markdown
+        .replace(/\nstatus: \w+\n/, '\nstatus: review\n')
+        .replace(/\nauthor: .*\n/, '\nauthor: someone-else\n')
+        .replace(/\n*$/, '\n- 2026-10-10 — review (fixed in projectes-v5)\n')
+      assert.strictEqual((await api(`/issues/${marta.id}`, { method: 'PUT', json: { markdown: closed }, headers: { 'If-Match': 'stale' } })).status, 412)
+      res = await api(`/issues/${marta.id}`, { method: 'PUT', json: { markdown: closed }, headers: { 'If-Match': before.hash } })
+      assert.strictEqual(res.status, 200)
+      const after = await res.json()
+      assert.match(after.markdown, /\nstatus: review\n/)
+      assert.match(after.markdown, /\nauthor: marta@coop.cat\n/)
+      assert.match(after.markdown, /— review \(fixed in projectes-v5\)\n$/)
+      assert.notStrictEqual(after.hash, before.hash)
+      for (let i = 0; i < 50 && sent.length < 2; i++) await new Promise((r) => setTimeout(r, 10))
+      assert.deepStrictEqual(sent.map((m) => m.to).sort(), ['boss@coop.cat', 'marta@coop.cat'])
+      assert.match(sent[0].text, /Equip ESSTRAPIS ha actualitzat el tiquet[\s\S]*→ En revisió/)
+    } finally {
+      mailer.setTransport(null)
+    }
   })
 
   test('an unreachable SMTP server is checked once, then skipped without blocking requests', async () => {
