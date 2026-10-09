@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // ESSTRAPIS instances (tenants) allowed to sign users in through /sso.
-//   npm run tenant -- add <tenant> ["<Name>"]       creates it and prints its API key (store it in the instance)
+//   npm run tenant -- add "<instance name>"       creates it and prints its API key (store it in the instance)
+//                                                  e.g. add "Fusteria La Serra, SCCL" -> tenant fusteria-la-serra-sccl
+//   npm run tenant -- add <tenant> ["<Name>"]       same, with an explicit tenant slug
 //   npm run tenant -- rotate <tenant>              new API key (the old one stops working)
 //   npm run tenant -- disable|enable <tenant>
 //   npm run tenant -- list
@@ -14,15 +16,15 @@ function main() {
   switch (cmd) {
     case 'add': {
       const t = tenants.add(tenant, rest[0])
-      console.log(`Created tenant ${t.tenant}. API key (keep it secret, set it in the ESSTRAPIS instance):\n${t.apiKey}`)
+      console.log(`Created tenant ${t.tenant} (${t.name}). API key (keep it secret, set it in the ESSTRAPIS instance):\n${t.apiKey}`)
       break
     }
     case 'rotate':
-      console.log(`New API key for ${tenant}:\n${tenants.rotate(tenant).apiKey}`)
+      console.log(`New API key for ${tenants.resolve(tenant)}:\n${tenants.rotate(tenants.resolve(tenant)).apiKey}`)
       break
     case 'disable':
     case 'enable':
-      tenants.setDisabled(tenant, cmd === 'disable')
+      tenants.setDisabled(tenants.resolve(tenant), cmd === 'disable')
       console.log(`${tenant} ${cmd}d`)
       break
     case 'list':
@@ -30,7 +32,7 @@ function main() {
       break
     case 'token': {
       const [email, name, ttl] = rest
-      const t = tenants.find(tenant)
+      const t = tenants.find(tenants.resolve(tenant))
       if (!t) throw new Error(`No active tenant ${tenant}`)
       if (!email) throw new Error('Usage: token <tenant> <email> ["<Full name>"] [ttlSeconds]')
       const ttlSec = Math.min(Number(ttl) || 300, sso.MAX_LIFETIME_SEC)

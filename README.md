@@ -47,12 +47,13 @@ npm run user -- list
 An ESSTRAPIS instance can send its logged-in users straight to the tickets site, with no password. Each instance is a **tenant** with its own secret API key:
 
 ```bash
-npm run tenant -- add coop-a "Coop A"     # prints the API key: set it in that instance (e.g. TICKETS_SSO_KEY)
+npm run tenant -- add "Coop A, SCCL"      # instance name as in ESSTRAPIS Configuració General -> tenant coop-a-sccl;
+                                          # prints the API key: set it in that instance as TICKETS_SSO_KEY
 npm run tenant -- list | rotate <tenant> | disable <tenant> | enable <tenant>
 npm run tenant -- token <tenant> <email> ["<Full name>"] [ttlSeconds]   # test login URL
 ```
 
-The instance builds a link `https://tiquets.esstrapis.org/sso?tenant=<tenant>&token=<token>`. The token is `{ email, name, exp, nonce }` encrypted with AES-256-GCM, using a key derived from the API key and the tenant name. The API key itself never travels. On a valid token, the site creates the user if it doesn't exist (role `user`, linked to the tenant), logs them in, and redirects to the ticket list. Their tickets record `tenant:` in the frontmatter.
+The instance builds a link `https://tiquets.esstrapis.org/sso?tenant=<tenant>&token=<token>`. The token is `{ email, name, exp, nonce }` encrypted with AES-256-GCM, using a key derived from the API key and the tenant name. The API key itself never travels. ESSTRAPIS uses the slug of the instance name (`me.name`) as the tenant, unless `TICKETS_TENANT` overrides it. If an instance is renamed, its tenant must be renamed here too, or its links stop working. On a valid token, the site creates the user if it doesn't exist (role `user`, linked to the tenant), logs them in, and redirects to the ticket list. Their tickets record `tenant:` in the frontmatter.
 
 Rules: tokens live at most 10 minutes and work once. An existing user can only come in through the tenant that created them. Admins and users created with a password (no tenant) must log in with their password, so an instance can't take over those accounts.
 

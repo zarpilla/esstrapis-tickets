@@ -398,4 +398,16 @@ describe('tickets app', () => {
       mailer.setTransport(null)
     }
   })
+
+  test('tenants can be added by instance name, with the same slug ESSTRAPIS signs with', () => {
+    const tenants = require('../lib/tenants')
+    const sso = require('../lib/sso')
+    const t = tenants.add('Fusteria La Serra, SCCL')
+    assert.strictEqual(t.tenant, 'fusteria-la-serra-sccl')
+    assert.strictEqual(t.name, 'Fusteria La Serra, SCCL')
+    assert.strictEqual(tenants.resolve("L'Olivera, SCCL"), 'l-olivera-sccl')
+    assert.strictEqual(tenants.resolve('coop-a'), 'coop-a')
+    assert.strictEqual(sso.tenantSlug('Cooperativa Ça Marxa · 2026'), 'cooperativa-ca-marxa-2026')
+    assert.throws(() => tenants.add('Fusteria La Serra, SCCL'), /already exists/)
+  })
 })
