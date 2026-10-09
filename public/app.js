@@ -1,7 +1,7 @@
 'use strict'
 
 const LABELS = {
-  todo: 'Pendent', 'in-progress': 'En curs', blocked: 'Bloquejat', review: 'En revisió', done: 'Fet', wontfix: 'Descartat',
+  todo: 'Pendent', 'in-progress': 'En procés', blocked: 'Bloquejat', review: 'En revisió', done: 'Fet', wontfix: 'Descartat',
   bug: 'Error', improvement: 'Millora', suggestion: 'Suggeriment',
   low: 'Baixa', medium: 'Mitjana', high: 'Alta', urgent: 'Urgent',
 }
