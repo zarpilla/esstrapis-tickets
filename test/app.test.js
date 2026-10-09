@@ -10,6 +10,7 @@ process.env.TICKETS_NO_DOTENV = '1'
 process.env.DATA_DIR = dataDir
 process.env.SESSION_SECRET = 'x'.repeat(40)
 process.env.ZAI_API_KEY = 'test-key'
+process.env.TICKETS_SSO_KEY = 'shared-sso-key-for-tests-0123456789abcdef'
 
 let aiReply = null
 let aiRequest = null
@@ -329,21 +330,23 @@ describe('tickets app', () => {
     }
   })
 
-  test('SSO from an ESSTRAPIS instance creates the user and logs them in, once', async () => {
+  test('SSO with the shared key creates the tenant and the user and logs them in, once', async () => {
     const tenants = require('../lib/tenants')
     const sso = require('../lib/sso')
-    const coop = tenants.add('coop-a', 'Coop A')
-    const other = tenants.add('coop-b', 'Coop B')
-    const ssoGet = (tenant, token) => fetch(`${base}/sso?tenant=${tenant}&token=${token}`, { redirect: 'manual' })
-    const tokenFor = (t, email, extra = {}) => sso.createToken({ tenant: t.tenant, apiKey: t.apiKey, email, name: 'Núria', ...extra })
+    const KEY = process.env.TICKETS_SSO_KEY
+    const ssoGet = (token) => fetch(`${base}/sso?token=${token}`, { redirect: 'manual' })
+    const tokenFor = (email, extra = {}) => sso.createToken({ secret: KEY, tenant: 'coop-a', tenantName: 'Coop A', email, name: 'Núria', ...extra })
 
-    const token = tokenFor(coop, 'Nuria@Coop-A.cat')
-    const res = await ssoGet('coop-a', token)
+    const token = tokenFor('Nuria@Coop-A.cat')
+    const res = await ssoGet(token)
     assert.strictEqual(res.status, 303)
     assert.strictEqual(res.headers.get('location'), '/#/')
     const cookie = res.headers.get('set-cookie').split(';')[0]
     const { user } = await (await call(cookie, '/me')).json()
     assert.deepStrictEqual(user, { username: 'nuria@coop-a.cat', name: 'Núria', role: 'user', tenant: 'coop-a' })
+    // The tenant registered itself.
+    assert.strictEqual(tenants.find('coop-a').name, 'Coop A')
+    assert.ok(tenants.find('coop-a').lastLogin)
 
     // The tenant is recorded on the user's tickets.
     aiReply = JSON.stringify({ title: 'From SSO', type: 'bug', description: 'x', acceptance_criteria: ['y'] })
@@ -351,25 +354,28 @@ describe('tickets app', () => {
     const file = fs.readdirSync(path.join(dataDir, 'issues')).find((f) => f.startsWith(`${id}-`))
     assert.match(fs.readFileSync(path.join(dataDir, 'issues', file), 'utf8'), /\nauthor: nuria@coop-a.cat\ntenant: coop-a\n/)
 
-    // Replay, wrong tenant, tampering, bad tenant names.
-    assert.strictEqual((await ssoGet('coop-a', token)).status, 401)
-    assert.strictEqual((await ssoGet('coop-b', tokenFor(coop, 'x@coop-a.cat'))).status, 401)
-    assert.strictEqual((await ssoGet('coop-a', tokenFor(coop, 'x@coop-a.cat').slice(0, -2) + 'AA')).status, 401)
-    assert.strictEqual((await ssoGet('nope', tokenFor(coop, 'x@coop-a.cat'))).status, 401)
-    // Expired, or valid for too long.
-    assert.strictEqual((await ssoGet('coop-a', tokenFor(coop, 'x@coop-a.cat', { ttlSec: -120 }))).status, 401)
-    assert.strictEqual((await ssoGet('coop-a', tokenFor(coop, 'x@coop-a.cat', { ttlSec: 3600 }))).status, 401)
-    // Another tenant can't take over this user, nor sign in as an admin or a password-only user.
-    assert.strictEqual((await ssoGet('coop-b', tokenFor(other, 'nuria@coop-a.cat'))).status, 401)
-    assert.strictEqual((await ssoGet('coop-b', tokenFor(other, 'boss@coop.cat'))).status, 401)
-    assert.strictEqual((await ssoGet('coop-b', tokenFor(other, 'marta@coop.cat'))).status, 401)
-    assert.strictEqual((await ssoGet('coop-a', tokenFor(coop, 'not-an-email'))).status, 401)
-    // A disabled tenant can't sign anyone in.
-    tenants.setDisabled('coop-a', true)
-    assert.strictEqual((await ssoGet('coop-a', tokenFor(coop, 'nuria@coop-a.cat'))).status, 401)
+    // Replay, wrong key, tampering, expired, too long, bad tenant, not an email.
+    assert.strictEqual((await ssoGet(token)).status, 401)
+    assert.strictEqual((await ssoGet(sso.createToken({ secret: 'another-key-another-key-another-key!', tenant: 'coop-a', email: 'x@coop-a.cat' }))).status, 401)
+    assert.strictEqual((await ssoGet(tokenFor('x@coop-a.cat').slice(0, -2) + 'AA')).status, 401)
+    assert.strictEqual((await ssoGet(tokenFor('x@coop-a.cat', { ttlSec: -120 }))).status, 401)
+    assert.strictEqual((await ssoGet(tokenFor('x@coop-a.cat', { ttlSec: 3600 }))).status, 401)
+    assert.strictEqual((await ssoGet(tokenFor('x@coop-a.cat', { tenant: '../etc' }))).status, 401)
+    assert.strictEqual((await ssoGet(tokenFor('not-an-email'))).status, 401)
+    // Admins and password accounts can't be signed in through SSO.
+    assert.strictEqual((await ssoGet(tokenFor('boss@coop.cat'))).status, 401)
+    assert.strictEqual((await ssoGet(tokenFor('marta@coop.cat'))).status, 401)
+
+    // The same person coming from another instance is let in, and the tenant follows.
+    const fromB = await ssoGet(tokenFor('nuria@coop-a.cat', { tenant: 'coop-b', tenantName: 'Coop B' }))
+    assert.strictEqual(fromB.status, 303)
+    assert.strictEqual(require('../lib/users').find('nuria@coop-a.cat').tenant, 'coop-b')
+
+    // A disabled tenant can't sign anyone in; re-enabled, it can.
+    tenants.setDisabled('Coop A', true)
+    assert.strictEqual((await ssoGet(tokenFor('nuria@coop-a.cat'))).status, 401)
     tenants.setDisabled('coop-a', false)
-    // A fresh token for the same user works again.
-    assert.strictEqual((await ssoGet('coop-a', tokenFor(coop, 'nuria@coop-a.cat'))).status, 303)
+    assert.strictEqual((await ssoGet(tokenFor('nuria@coop-a.cat'))).status, 303)
   })
 
   test('an unreachable SMTP server is checked once, then skipped without blocking requests', async () => {
@@ -399,15 +405,13 @@ describe('tickets app', () => {
     }
   })
 
-  test('tenants can be added by instance name, with the same slug ESSTRAPIS signs with', () => {
+  test('tenant names resolve to the same slug ESSTRAPIS signs with', () => {
     const tenants = require('../lib/tenants')
     const sso = require('../lib/sso')
-    const t = tenants.add('Fusteria La Serra, SCCL')
-    assert.strictEqual(t.tenant, 'fusteria-la-serra-sccl')
-    assert.strictEqual(t.name, 'Fusteria La Serra, SCCL')
+    assert.strictEqual(tenants.resolve('Fusteria La Serra, SCCL'), 'fusteria-la-serra-sccl')
     assert.strictEqual(tenants.resolve("L'Olivera, SCCL"), 'l-olivera-sccl')
     assert.strictEqual(tenants.resolve('coop-a'), 'coop-a')
     assert.strictEqual(sso.tenantSlug('Cooperativa Ça Marxa · 2026'), 'cooperativa-ca-marxa-2026')
-    assert.throws(() => tenants.add('Fusteria La Serra, SCCL'), /already exists/)
   })
+
 })

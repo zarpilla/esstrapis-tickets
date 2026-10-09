@@ -15,7 +15,7 @@ data/
   issues/001-add-excel-export-to-partners.md
   uploads/001/<random>.png
   users.json            # scrypt password hashes, mode 600
-  tenants.json          # ESSTRAPIS instances and their SSO API keys, mode 600
+  tenants.json          # ESSTRAPIS instances seen through SSO (and blocked ones), mode 600
 ```
 
 ## Run locally
@@ -44,46 +44,25 @@ npm run user -- list
 
 ## Login from ESSTRAPIS (SSO)
 
-An ESSTRAPIS instance can send its logged-in users straight to the tickets site, with no password. Each instance is a **tenant** with its own secret API key:
+ESSTRAPIS instances send their logged-in users straight to the tickets site, with no password. All instances and this site share one secret, `TICKETS_SSO_KEY` (32+ chars, e.g. `openssl rand -base64 48`). Set it in this site's `.env` and in every instance's environment. With it empty, SSO is off.
+
+When a user clicks "Tiquets", the instance builds `https://tiquets.esstrapis.org/sso?token=<token>`. The token is `{ tenant, tenantName, email, name, exp, nonce }` encrypted with AES-256-GCM, using a key derived from the shared secret. The secret itself never travels. The tenant is the slug of the instance name in Configuració General ("Fusteria La Serra, SCCL" → `fusteria-la-serra-sccl`).
+
+A token that decrypts is trusted:
+- The tenant registers itself on its first login. Nothing has to be created by hand.
+- The user is created if they don't exist (role `user`). Their `tenant` is updated on every login, so someone working in two instances can come in from either. Their tickets record `tenant:` in the frontmatter.
+- Tokens live at most 10 minutes and work once.
+- Admins and accounts created with a password can't be signed in through SSO; they log in with their password.
 
 ```bash
-npm run tenant -- add "Coop A, SCCL"      # instance name as in ESSTRAPIS Configuració General -> tenant coop-a-sccl;
-                                          # prints the API key: set it in that instance as TICKETS_SSO_KEY
-npm run tenant -- list | rotate <tenant> | disable <tenant> | enable <tenant>
-npm run tenant -- token <tenant> <email> ["<Full name>"] [ttlSeconds]   # test login URL
+npm run tenant -- list                                   # instances seen, last login
+npm run tenant -- disable "<instance name or tenant>"    # block an instance (enable to undo)
+npm run tenant -- token "<instance name>" <email> ["<Full name>"] [ttlSeconds]   # test login URL
 ```
 
-The instance builds a link `https://tiquets.esstrapis.org/sso?tenant=<tenant>&token=<token>`. The token is `{ email, name, exp, nonce }` encrypted with AES-256-GCM, using a key derived from the API key and the tenant name. The API key itself never travels. ESSTRAPIS uses the slug of the instance name (`me.name`) as the tenant, unless `TICKETS_TENANT` overrides it. If an instance is renamed, its tenant must be renamed here too, or its links stop working. On a valid token, the site creates the user if it doesn't exist (role `user`, linked to the tenant), logs them in, and redirects to the ticket list. Their tickets record `tenant:` in the frontmatter.
+Anyone holding the shared secret can sign in as any SSO user of any instance, so keep it only on servers you run. To revoke it, change it here and in every instance.
 
-Rules: tokens live at most 10 minutes and work once. An existing user can only come in through the tenant that created them. Admins and users created with a password (no tenant) must log in with their password, so an instance can't take over those accounts.
-
-Code for the ESSTRAPIS side (Node, no dependencies):
-
-```js
-const crypto = require('crypto')
-
-function ticketsLoginUrl({ tenant, apiKey, email, name }) {
-  const key = Buffer.from(crypto.hkdfSync('sha256', Buffer.from(apiKey, 'utf8'), 'esstrapis-tickets-sso', tenant, 32))
-  const payload = { email, name, exp: Math.floor(Date.now() / 1000) + 300, nonce: crypto.randomBytes(16).toString('base64url') }
-  const iv = crypto.randomBytes(12)
-  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv)
-  cipher.setAAD(Buffer.from(tenant, 'utf8'))
-  const enc = Buffer.concat([cipher.update(JSON.stringify(payload), 'utf8'), cipher.final()])
-  const token = Buffer.concat([iv, enc, cipher.getAuthTag()]).toString('base64url')
-  return `https://tiquets.esstrapis.org/sso?tenant=${encodeURIComponent(tenant)}&token=${token}`
-}
-```
-
-Build the URL on the server, when the user clicks the link (e.g. an endpoint that responds with a redirect). Never put the API key in front-end code.
-
-## Security
-
-- Passwords are hashed with scrypt. Login takes the same time for unknown users and is rate limited per IP and username.
-- The session is an HMAC-signed cookie (`HttpOnly`, `SameSite=Strict`, `Secure` in production). Changing a password or disabling a user invalidates their cookies.
-- CSRF protection: every write needs the `X-Requested-With: tickets` header and a same-origin `Origin`.
-- Strict CSP with no inline scripts. Issue Markdown is rendered on the server with raw HTML escaped and only `http(s)`/`mailto` links allowed.
-- Uploads: extension allowlist (images, PDF, text, Office/LibreOffice; no HTML or SVG), size and count limits, and random file names on disk. Files are served only to the ticket's author or an admin, with `nosniff` and a sandboxing CSP. Non-image and non-PDF files are served as downloads.
-- The text sent to the AI is treated as data, and the model output is validated field by field. Each user can make at most 30 AI requests (new tickets and follow-ups) per hour, to protect the API quota.
+The ESSTRAPIS side lives in `projectes-v5/src/services/tickets-sso.js` (`GET /api/me/tickets-login`).
 
 ## Docker
 
@@ -92,10 +71,9 @@ GitHub Actions (`.github/workflows/docker.yml`) runs the tests and builds the im
 The image (Node 24, Alpine) runs as the `node` user, listens on port 3000, and keeps everything in the `/data` volume. Run it with `deploy/docker-compose.yml`:
 
 ```bash
-cp .env.example deploy/.env && nano deploy/.env       # SESSION_SECRET, ZAI_API_KEY, SMTP_*, PUBLIC_URL
+cp .env.example deploy/.env && nano deploy/.env       # SESSION_SECRET, TICKETS_SSO_KEY, ZAI_API_KEY, SMTP_*, PUBLIC_URL
 DOCKERHUB_USERNAME=<user> docker compose -f deploy/docker-compose.yml up -d
 docker compose -f deploy/docker-compose.yml exec tickets npm run user -- add admin@example.org "Admin" admin
-docker compose -f deploy/docker-compose.yml exec tickets npm run tenant -- add "<instance name>"
 ```
 
 nginx (`deploy/nginx.conf`) stays in front, proxying to `127.0.0.1:3000`. Back up the `tickets-data` volume.

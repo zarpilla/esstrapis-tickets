@@ -13,6 +13,11 @@ const sso = require('./lib/sso')
 const tenants = require('./lib/tenants')
 const { setSession, clearSession, sessionMiddleware } = require('./lib/session')
 
+if (config.ssoKey && config.ssoKey.length < 32) {
+  console.error('TICKETS_SSO_KEY must have 32+ chars. Generate one with: openssl rand -base64 48')
+  process.exit(1)
+}
+
 if (!config.sessionSecret || config.sessionSecret.length < 32) {
   console.error('SESSION_SECRET must be set (32+ chars). Generate one with: openssl rand -hex 32')
   process.exit(1)
@@ -148,31 +153,26 @@ app.post('/api/login', (req, res) => {
   res.json({ user: users.publicUser(user) })
 })
 
-// SSO from an ESSTRAPIS instance: /sso?tenant=<tenant>&token=<encrypted token>
+// SSO from an ESSTRAPIS instance: /sso?token=<encrypted token> (see lib/sso.js)
 const ssoFailedPage = `<!doctype html><html lang="ca"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Accés no vàlid</title><link rel="stylesheet" href="/style.css"><main><section class="card narrow"><h1>Enllaç d'accés no vàlid</h1><p class="muted">L'enllaç ha caducat o ja s'ha fet servir. Torna-hi des d'ESSTRAPIS o entra amb el teu usuari.</p><p><a href="/">Ves a l'inici</a></p></section></main></html>`
 
 app.get('/sso', (req, res) => {
   res.setHeader('Cache-Control', 'no-store')
   res.setHeader('Referrer-Policy', 'no-referrer')
   const fail = (reason) => {
-    console.warn(`[sso] rejected (${req.ip}, tenant ${String(req.query.tenant).slice(0, 64)}): ${reason}`)
+    console.warn(`[sso] rejected (${req.ip}): ${reason}`)
     loginFailed(`sso|${req.ip}`)
     res.status(401).type('html').send(ssoFailedPage)
   }
   if (loginBlocked(`sso|${req.ip}`, SSO_MAX_FAILURES)) return res.status(429).type('html').send(ssoFailedPage)
-  const tenantName = String(req.query.tenant || '')
-  const tenant = sso.TENANT_RE.test(tenantName) && tenants.find(tenantName)
-  if (!tenant) return fail('unknown tenant')
+  if (!config.ssoKey) return fail('SSO is off (no TICKETS_SSO_KEY)')
   let payload
-  try {
-    payload = sso.readToken({ tenant: tenant.tenant, apiKey: tenant.apiKey, token: req.query.token })
-    if (!sso.consumeNonce(payload.nonce, payload.exp)) throw new Error('token already used')
-  } catch (err) {
-    return fail(err.message)
-  }
   let user
   try {
-    user = users.ssoLogin({ email: payload.email, name: payload.name, tenant: tenant.tenant })
+    payload = sso.readToken({ secret: config.ssoKey, token: req.query.token })
+    if (!sso.consumeNonce(payload.nonce, payload.exp)) throw new Error('token already used')
+    if (!tenants.seen(payload.tenant, payload.tenantName)) throw new Error(`tenant ${payload.tenant} is disabled`)
+    user = users.ssoLogin({ email: payload.email, name: payload.name, tenant: payload.tenant })
   } catch (err) {
     return fail(err.message)
   }
