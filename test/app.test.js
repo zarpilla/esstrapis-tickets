@@ -467,10 +467,10 @@ describe('tickets app', () => {
     assert.strictEqual((await fetch(`${base}/api/v1/issues`, { headers: { Cookie: admin } })).status, 401)
 
     // PUT with the local id creates the file under that id, keeping the local slug.
-    let res = await api('/issues/900', { method: 'PUT', json: { markdown: file('900'), slug: 'show-irpf-in-quote-pdf' }, headers: { 'If-None-Match': '*' } })
+    let res = await api('/issues/900', { method: 'PUT', json: { markdown: file('900'), slug: 'show-irpf-in-quote-pdf-and-in-invoices' }, headers: { 'If-None-Match': '*' } })
     assert.strictEqual(res.status, 201)
     let issue = await res.json()
-    assert.strictEqual(issue.file, '900-show-irpf-in-quote-pdf.md')
+    assert.strictEqual(issue.file, '900-show-irpf-in-quote-pdf-and-in-invoices.md')
     assert.match(issue.markdown, /^---\nid: 900\ntitle: Show IRPF in the quote PDF\ntype: bug\nstatus: todo\npriority: medium\nproject: projectes-front, projectes-v5\ncreated: 2026-10-08\nupdated: 2026-10-09\npublic: false\n---\n\n# 900 — Show IRPF/)
     assert.strictEqual((await api('/issues/900', { method: 'PUT', json: { markdown: file('900') }, headers: { 'If-None-Match': '*' } })).status, 412)
 
