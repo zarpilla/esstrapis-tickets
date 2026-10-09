@@ -5,14 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ESSTRAPIS · Tiquets</title>
   <link rel="stylesheet" href="style.css">
+  <script src="theme.js"></script>
   <script src="app.js" defer></script>
 </head>
 <body>
   <header class="topbar">
     <a href="#/" class="brand">ESSTRAPIS <span>Tiquets</span></a>
-    <div id="whoami" hidden>
-      <span id="username"></span>
-      <button id="logout" class="link">Surt</button>
+    <div class="top-actions">
+      <button id="theme" class="theme-toggle" type="button"></button>
+      <div id="whoami" hidden>
+        <span id="username"></span>
+        <button id="logout" class="link">Surt</button>
+      </div>
     </div>
   </header>
 

@@ -13,18 +13,30 @@
   --review: #efe7fc; --review-t: #5b2fa8;
   --done: #e3f5ea; --done-t: #1d6b3a;
   --wontfix: #eceef1; --wontfix-t: #555c66;
+  color-scheme: light;
 }
+/* Dark: follows the system unless the user picked a theme (data-theme on <html>) */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #14171c; --card: #1d2128; --text: #e6e8eb; --muted: #9aa1ab; --border: #2f343d;
     --accent: #4fae93; --accent-text: #0d1512; --error: #ff8a80;
     --todo: #1f2a44; --todo-t: #9bb5ff; --progress: #3a2f12; --progress-t: #ffd479;
     --blocked: #3d1d1d; --blocked-t: #ff9c9c; --review: #2c2240; --review-t: #c9a8ff;
     --done: #18331f; --done-t: #8ee0a8; --wontfix: #2a2e35; --wontfix-t: #aab0b8;
+    color-scheme: dark;
   }
+}
+:root[data-theme="dark"] {
+  --bg: #14171c; --card: #1d2128; --text: #e6e8eb; --muted: #9aa1ab; --border: #2f343d;
+  --accent: #4fae93; --accent-text: #0d1512; --error: #ff8a80;
+  --todo: #1f2a44; --todo-t: #9bb5ff; --progress: #3a2f12; --progress-t: #ffd479;
+  --blocked: #3d1d1d; --blocked-t: #ff9c9c; --review: #2c2240; --review-t: #c9a8ff;
+  --done: #18331f; --done-t: #8ee0a8; --wontfix: #2a2e35; --wontfix-t: #aab0b8;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
 a { color: var(--accent); }
 h1, h2 { margin: 0 0 .6rem; line-height: 1.25; }
@@ -33,7 +45,9 @@ h1 { font-size: 1.35rem; } h2 { font-size: 1.1rem; }
 .topbar { display: flex; justify-content: space-between; align-items: center; padding: .7rem 16px; background: var(--card); border-bottom: 1px solid var(--border); }
 .brand { font-weight: 700; text-decoration: none; color: var(--text); }
 .brand span { color: var(--accent); font-weight: 500; }
+.top-actions { display: flex; gap: 1rem; align-items: center; }
 #whoami { display: flex; gap: .8rem; align-items: center; font-size: .9rem; }
+.theme-toggle { background: none; color: var(--text); border: 1px solid var(--border); border-radius: 99px; padding: .2rem .7rem; font-weight: 500; font-size: .85rem; }
 
 main { max-width: 980px; margin: 0 auto; padding: 16px; }
 .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 1.2rem; margin-bottom: 16px; }
@@ -45,7 +59,7 @@ main { max-width: 980px; margin: 0 auto; padding: 16px; }
 
 label { display: block; margin-bottom: .8rem; font-weight: 500; }
 input, textarea, select, button { font: inherit; color: inherit; }
-input:not([type=file]), textarea, select { width: 100%; padding: .55rem .65rem; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); }
+form input:not([type=file]), textarea, select { width: 100%; padding: .55rem .65rem; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); }
 select { width: auto; }
 label input { margin-top: .25rem; }
 textarea { resize: vertical; margin-bottom: .6rem; }
@@ -78,6 +92,11 @@ th { color: var(--muted); font-weight: 500; }
 .md code { background: var(--bg); padding: .05rem .3rem; border-radius: 4px; font-size: .9em; }
 .md pre { background: var(--bg); padding: .8rem; border-radius: 7px; overflow-x: auto; }
 .md ul { padding-left: 1.3rem; }
+.md li { margin: .2rem 0; }
+.md li > p { margin: 0; }
+/* Task lists (- [ ] ...): checkbox inline, no bullet */
+.md li:has(> input[type=checkbox]), .md li:has(> p > input[type=checkbox]) { list-style: none; margin-left: -1.3rem; }
+.md li input[type=checkbox] { margin: 0 .5rem 0 0; vertical-align: -1px; accent-color: var(--accent); }
 
 .files { list-style: none; padding: 0; display: grid; gap: .8rem; }
 .files li { display: flex; flex-direction: column; gap: .2rem; }
