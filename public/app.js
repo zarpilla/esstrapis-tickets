@@ -114,7 +114,6 @@ async function renderHome() {
 async function renderIssue(id, aiReply) {
   mount('tpl-issue')
   const { issue } = await api(`/issues/${encodeURIComponent(id)}`)
-  document.title = `#${issue.id} ${issue.title} · Tiquets`
   const set = (k, text) => { view.querySelector(`[data-k="${k}"]`).textContent = text }
   set('type', label(issue.type))
   set('priority', `Prioritat ${label(issue.priority).toLowerCase()}`)
@@ -123,19 +122,32 @@ async function renderIssue(id, aiReply) {
   set('project', issue.project || '')
   set('author', `per ${issue.authorName} · ${issue.created}`)
 
-  // Rendered server-side from Markdown, with raw HTML escaped and links filtered.
-  document.getElementById('body').innerHTML = issue.html
-
   // Tickets are shown in Catalan; admins can switch to the English file.
-  if (issue.original) {
-    const toggle = document.getElementById('show-original')
-    let english = false
-    toggle.parentElement.hidden = false
-    toggle.addEventListener('click', () => {
-      english = !english
-      document.getElementById('body').innerHTML = english ? issue.original.html : issue.html
-      toggle.textContent = english ? 'Mostra la traducció al català' : "Mostra l'original en anglès"
-    })
+  const body = document.getElementById('body')
+  const toggle = document.getElementById('show-original')
+  let english = false
+  const draw = () => {
+    document.title = `#${issue.id} ${issue.title} · Tiquets`
+    // Rendered server-side from Markdown, with raw HTML escaped and links filtered.
+    body.innerHTML = english ? issue.original.html : issue.html
+    toggle.parentElement.hidden = !issue.original
+    toggle.textContent = english ? 'Mostra la traducció al català' : "Mostra l'original en anglès"
+  }
+  toggle.addEventListener('click', () => { english = !english; draw() })
+  draw()
+
+  // Not translated yet: the English text is already on screen, the Catalan one replaces it when ready.
+  if (issue.translating) {
+    const note = view.querySelector('.translating')
+    note.hidden = false
+    api(`/issues/${encodeURIComponent(id)}?wait=1`)
+      .then(({ issue: ca }) => {
+        if (!body.isConnected || !ca.translated) return
+        Object.assign(issue, { title: ca.title, html: ca.html, original: ca.original })
+        draw()
+      })
+      .catch(() => {})
+      .finally(() => { note.hidden = true })
   }
 
   const select = document.getElementById('status')

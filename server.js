@@ -326,10 +326,12 @@ app.get('/api/issues', requireUser, (req, res) => {
 })
 
 // Shown in Catalan; the file stays in English. Admins also get the English original.
+// A missing translation doesn't hold the page: the English text comes back at once with
+// translating: true, and the client asks again with ?wait=1 for the Catalan version.
 app.get('/api/issues/:id', requireUser, async (req, res) => {
   const issue = issues.get(req.params.id)
   if (!issue || !canSee(req.user, issue)) return res.status(404).json({ error: 'Not found' })
-  const ca = await translations.ensure(issue, config.ai.translateWaitMs)
+  const ca = await translations.ensure(issue, req.query.wait ? config.ai.translateWaitMs : 0)
   const { body, ...rest } = issue
   res.json({
     issue: {
@@ -338,6 +340,7 @@ app.get('/api/issues/:id', requireUser, async (req, res) => {
       canEdit: canEdit(req.user, issue),
       html: markdown.parse(inlineAttachments(issue, ca.body)),
       translated: ca.translated,
+      translating: Boolean(ca.pending),
       ...(ca.translated && isAdmin(req.user) ? { original: { title: issue.title, html: markdown.parse(inlineAttachments(issue, body)) } } : {}),
     },
   })

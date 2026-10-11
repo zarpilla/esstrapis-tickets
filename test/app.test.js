@@ -307,9 +307,10 @@ describe('tickets app', () => {
       const file = path.join(dataDir, 'issues', fs.readdirSync(path.join(dataDir, 'issues')).find((f) => f.startsWith(`${id}-`)))
       const english = fs.readFileSync(file, 'utf8')
 
-      let { issue } = await (await call(anna, `/issues/${id}`)).json()
+      let { issue } = await (await call(anna, `/issues/${id}?wait=1`)).json()
       assert.strictEqual(translationRequests, before + 1)
       assert.strictEqual(issue.title, 'Exporta Export members')
+      assert.strictEqual(issue.translating, false)
       assert.strictEqual(issue.translated, true)
       assert.strictEqual(issue.original, undefined)
       assert.match(issue.html, new RegExp(`<h1>${id} — CA Export members</h1>`))
@@ -330,17 +331,24 @@ describe('tickets app', () => {
       assert.strictEqual(translationRequests, before + 1)
       assert.match(issue.html, /— estat Pendent → Fet \(anna\)/)
 
-      // A hand edit of the English file is translated on the next view.
+      // A hand edit of the English file is translated on the next view: the English text
+      // comes back at once, the Catalan one when asked to wait for it.
       fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('Members cannot be exported.', 'Members cannot be exported to Excel.'))
       ;({ issue } = await (await call(anna, `/issues/${id}`)).json())
+      assert.strictEqual(issue.translated, false)
+      assert.strictEqual(issue.translating, true)
+      assert.match(issue.html, /<p>Members cannot be exported to Excel\.<\/p>/)
+      ;({ issue } = await (await call(anna, `/issues/${id}?wait=1`)).json())
+      assert.strictEqual(issue.translated, true)
       assert.strictEqual(translationRequests, before + 2)
       assert.match(issue.html, /ca: Members cannot be exported to Excel\./)
 
       // If the translation fails, the English text is shown.
       translate = null
       const { id: id2 } = await (await call(anna, '/issues', { method: 'POST', body: newIssueForm('Una altra cosa a exportar') })).json()
-      ;({ issue } = await (await call(anna, `/issues/${id2}`)).json())
+      ;({ issue } = await (await call(anna, `/issues/${id2}?wait=1`)).json())
       assert.strictEqual(issue.translated, false)
+      assert.strictEqual(issue.translating, false)
       assert.strictEqual(issue.title, 'Export members')
       assert.match(issue.html, /<h2>Description<\/h2>/)
     } finally {
