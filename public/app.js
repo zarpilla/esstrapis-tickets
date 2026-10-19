@@ -151,17 +151,23 @@ async function renderIssue(id, aiReply) {
   draw()
 
   // Not translated yet: the English text is already on screen, the Catalan one replaces it when ready.
+  // A long ticket can outlast one server wait, so ask again while the translation is still running.
   if (issue.translating) {
     const note = view.querySelector('.translating')
     note.hidden = false
-    api(`/issues/${encodeURIComponent(id)}?wait=1`)
-      .then(({ issue: ca }) => {
-        if (!body.isConnected || !ca.translated) return
-        Object.assign(issue, { title: ca.title, html: ca.html, original: ca.original })
-        draw()
-      })
-      .catch(() => {})
-      .finally(() => { note.hidden = true })
+    const poll = async () => {
+      for (let tries = 0; tries < 5 && body.isConnected; tries++) {
+        const { issue: ca } = await api(`/issues/${encodeURIComponent(id)}?wait=1`)
+        if (!body.isConnected) return
+        if (ca.translated) {
+          Object.assign(issue, { title: ca.title, html: ca.html, original: ca.original })
+          draw()
+          return
+        }
+        if (!ca.translating) return
+      }
+    }
+    poll().catch(() => {}).finally(() => { note.hidden = true })
   }
 
   const select = document.getElementById('status')
