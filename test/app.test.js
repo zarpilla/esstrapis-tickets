@@ -171,11 +171,11 @@ describe('tickets app', () => {
     assert.deepStrictEqual((await (await call(admin, '/issues')).json()).issues.map((i) => i.id), ['002', '001'])
 
     assert.strictEqual((await call(anna, '/issues/001', { method: 'PATCH', json: { status: 'nonsense' } })).status, 400)
-    assert.strictEqual((await call(anna, '/issues/001', { method: 'PATCH', json: { status: 'blocked' } })).status, 200)
+    assert.strictEqual((await call(anna, '/issues/001', { method: 'PATCH', json: { status: 'queued' } })).status, 200)
     assert.strictEqual((await call(admin, '/issues/001', { method: 'PATCH', json: { status: 'done' } })).status, 200)
     const md = fs.readFileSync(path.join(dataDir, 'issues', '001-add-excel-export-to-partners.md'), 'utf8')
     assert.match(md, /\nstatus: done\n/)
-    assert.match(md, /— status todo → blocked \(anna\)\n- .* — status blocked → done \(admin\)\n$/)
+    assert.match(md, /— status todo → queued \(anna\)\n- .* — status queued → done \(admin\)\n$/)
   })
 
   test('escapes raw HTML and unsafe links in the issue body', async () => {

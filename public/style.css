@@ -8,6 +8,7 @@
   --accent-text: #ffffff;
   --error: #b42318;
   --todo: #e8eefc; --todo-t: #2848a8;
+  --queued: #e0f4f6; --queued-t: #1f6670;
   --progress: #fff4d6; --progress-t: #8a5a00;
   --blocked: #fde7e7; --blocked-t: #a02020;
   --review: #efe7fc; --review-t: #5b2fa8;
@@ -20,7 +21,7 @@
   :root:not([data-theme="light"]) {
     --bg: #14171c; --card: #1d2128; --text: #e6e8eb; --muted: #9aa1ab; --border: #2f343d;
     --accent: #4fae93; --accent-text: #0d1512; --error: #ff8a80;
-    --todo: #1f2a44; --todo-t: #9bb5ff; --progress: #3a2f12; --progress-t: #ffd479;
+    --todo: #1f2a44; --todo-t: #9bb5ff; --queued: #163338; --queued-t: #8adbe4; --progress: #3a2f12; --progress-t: #ffd479;
     --blocked: #3d1d1d; --blocked-t: #ff9c9c; --review: #2c2240; --review-t: #c9a8ff;
     --done: #18331f; --done-t: #8ee0a8; --wontfix: #2a2e35; --wontfix-t: #aab0b8;
     color-scheme: dark;
@@ -29,7 +30,7 @@
 :root[data-theme="dark"] {
   --bg: #14171c; --card: #1d2128; --text: #e6e8eb; --muted: #9aa1ab; --border: #2f343d;
   --accent: #4fae93; --accent-text: #0d1512; --error: #ff8a80;
-  --todo: #1f2a44; --todo-t: #9bb5ff; --progress: #3a2f12; --progress-t: #ffd479;
+  --todo: #1f2a44; --todo-t: #9bb5ff; --queued: #163338; --queued-t: #8adbe4; --progress: #3a2f12; --progress-t: #ffd479;
   --blocked: #3d1d1d; --blocked-t: #ff9c9c; --review: #2c2240; --review-t: #c9a8ff;
   --done: #18331f; --done-t: #8ee0a8; --wontfix: #2a2e35; --wontfix-t: #aab0b8;
   color-scheme: dark;
@@ -99,6 +100,7 @@ th { color: var(--muted); font-weight: 500; }
 
 .status, .badge { display: inline-block; padding: .05rem .5rem; border-radius: 99px; font-size: .82rem; white-space: nowrap; background: var(--wontfix); color: var(--wontfix-t); }
 .s-todo { background: var(--todo); color: var(--todo-t); }
+.s-queued { background: var(--queued); color: var(--queued-t); }
 .s-in-progress { background: var(--progress); color: var(--progress-t); }
 .s-blocked { background: var(--blocked); color: var(--blocked-t); }
 .s-review { background: var(--review); color: var(--review-t); }
