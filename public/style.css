@@ -59,6 +59,7 @@ main { max-width: 980px; margin: 0 auto; padding: 16px; }
 .error { color: var(--error); }
 .row { display: flex; gap: .8rem; align-items: center; justify-content: space-between; flex-wrap: wrap; }
 .nowrap { white-space: nowrap; }
+.filters { display: flex; flex-wrap: wrap; gap: .5rem; }
 
 label { display: block; margin-bottom: .8rem; font-weight: 500; }
 input, textarea, select, button { font: inherit; color: inherit; }

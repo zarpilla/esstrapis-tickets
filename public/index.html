@@ -54,11 +54,15 @@
     <section class="card">
       <div class="row">
         <h2>Tiquets</h2>
-        <select id="filter">
-          <option value="open">Oberts</option>
-          <option value="closed">Tancats</option>
-          <option value="all">Tots</option>
-        </select>
+        <div class="filters">
+          <select id="filter" aria-label="Estat">
+            <option value="open">Oberts</option>
+            <option value="closed">Tancats</option>
+            <option value="all">Tots</option>
+          </select>
+          <select id="filter-type" aria-label="Tipus"><option value="">Tots els tipus</option></select>
+          <select id="filter-priority" aria-label="Prioritat"><option value="">Totes les prioritats</option></select>
+        </div>
       </div>
       <div class="table-wrap">
         <table>

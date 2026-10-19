@@ -327,7 +327,7 @@ app.post('/api/logout', (req, res) => {
 })
 
 app.get('/api/me', requireUser, (req, res) => {
-  res.json({ user: users.publicUser(req.user), statuses: issues.STATUSES, closed: issues.CLOSED, upload: { ...config.upload, extensions: Object.keys(ALLOWED_UPLOADS) } })
+  res.json({ user: users.publicUser(req.user), statuses: issues.STATUSES, closed: issues.CLOSED, types: issues.TYPES, priorities: issues.PRIORITIES, upload: { ...config.upload, extensions: Object.keys(ALLOWED_UPLOADS) } })
 })
 
 // For the admins' share picker: users with an email address, enabled.

@@ -7,7 +7,7 @@ const LABELS = {
 }
 const label = (k) => LABELS[k] || k || ''
 
-let session = null // { user, statuses, closed, upload }
+let session = null // { user, statuses, closed, types, priorities, upload }
 const view = document.getElementById('view')
 
 async function api(path, options = {}) {
@@ -87,15 +87,27 @@ async function renderHome() {
 
   const filter = document.getElementById('filter')
   filter.append(el('optgroup', { label: 'Per estat' }, ...session.statuses.map((s) => el('option', { value: `status:${s}` }, label(s)))))
-  try { filter.value = localStorage.getItem('filter') || 'open' } catch { /* storage blocked */ }
-  if (!filter.value) filter.value = 'open'
+  const byType = document.getElementById('filter-type')
+  byType.append(...session.types.map((t) => el('option', { value: t }, label(t))))
+  const byPriority = document.getElementById('filter-priority')
+  byPriority.append(...session.priorities.map((p) => el('option', { value: p }, label(p))))
+  // Each filter remembers its choice; an unknown stored value falls back to the default.
+  const filters = [[filter, 'filter', 'open'], [byType, 'filter-type', ''], [byPriority, 'filter-priority', '']]
+  for (const [select, key, fallback] of filters) {
+    try { select.value = localStorage.getItem(key) || fallback } catch { /* storage blocked */ }
+    if (select.selectedIndex < 0) select.value = fallback
+  }
 
   const { issues } = await api('/issues')
   const draw = () => {
-    try { localStorage.setItem('filter', filter.value) } catch { /* storage blocked */ }
+    for (const [select, key] of filters) {
+      try { localStorage.setItem(key, select.value) } catch { /* storage blocked */ }
+    }
     const isClosed = (i) => session.closed.includes(i.status)
     const f = filter.value
-    const shown = issues.filter((i) => f === 'all' || (f.startsWith('status:') ? i.status === f.slice(7) : (f === 'closed') === isClosed(i)))
+    const shown = issues.filter((i) => (f === 'all' || (f.startsWith('status:') ? i.status === f.slice(7) : (f === 'closed') === isClosed(i)))
+      && (!byType.value || i.type === byType.value)
+      && (!byPriority.value || i.priority === byPriority.value))
     document.getElementById('list').replaceChildren(...shown.map((i) => el('tr', {},
       el('td', {}, i.id),
       el('td', {}, el('a', { href: `#/issue/${i.id}` }, i.title || '(sense títol)'),
@@ -109,7 +121,7 @@ async function renderHome() {
     )))
     document.getElementById('empty').hidden = shown.length > 0
   }
-  filter.addEventListener('change', draw)
+  for (const [select] of filters) select.addEventListener('change', draw)
   draw()
 }
 
