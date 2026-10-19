@@ -292,6 +292,94 @@ describe('tickets app', () => {
     assert.strictEqual((await call(pere, `/issues/${id}`)).status, 200)
   })
 
+  test('admins share a private ticket with chosen people, who can read it and add information', async () => {
+    const mailer = require('../lib/mailer')
+    const sso = require('../lib/sso')
+    const sent = []
+    mailer.setTransport({ sendMail: async (m) => { sent.push(m) } })
+    const waitFor = async (n) => {
+      for (let i = 0; i < 50 && sent.length < n; i++) await new Promise((r) => setTimeout(r, 10))
+      assert.strictEqual(sent.length, n)
+      return sent.splice(0).sort((a, b) => a.to.localeCompare(b.to))
+    }
+    try {
+      aiReply = JSON.stringify({ title: 'Only for some', type: 'bug', description: 'Private.', acceptance_criteria: ['x'] })
+      const anna = await login('anna', 'anna-password-1')
+      const pere = await login('pere', 'pere-password-2')
+      const admin = await login('admin', 'admin-password-1')
+      const { id } = await (await call(anna, '/issues', { method: 'POST', body: newIssueForm('Només per a alguns', [['s.png', 'SHARED', 'image/png']]) })).json()
+      const file = path.join(dataDir, 'issues', fs.readdirSync(path.join(dataDir, 'issues')).find((f) => f.startsWith(`${id}-`)))
+      await new Promise((r) => setTimeout(r, 50))
+      sent.splice(0)
+
+      // Only admins can share, with email addresses.
+      assert.strictEqual((await call(anna, `/issues/${id}`, { method: 'PATCH', json: { sharedWith: ['joan@coop-b.cat'] } })).status, 403)
+      assert.strictEqual((await call(admin, `/issues/${id}`, { method: 'PATCH', json: { sharedWith: ['pere'] } })).status, 400)
+      assert.strictEqual((await call(admin, `/issues/${id}`, { method: 'PATCH', json: { sharedWith: 'joan@coop-b.cat' } })).status, 400)
+
+      // Shared with someone who has never logged in: the address is typed by hand.
+      assert.strictEqual((await call(admin, `/issues/${id}`, { method: 'PATCH', json: { sharedWith: [' Joan@Coop-B.cat ', 'joan@coop-b.cat'] } })).status, 200)
+      assert.match(fs.readFileSync(file, 'utf8'), /\npublic: false\n[\s\S]*shared_with:\n  - joan@coop-b.cat\n/)
+      assert.match(fs.readFileSync(file, 'utf8'), /— shared with joan@coop-b.cat \(admin\)\n$/)
+      const mails = await waitFor(1)
+      assert.strictEqual(mails[0].to, 'joan@coop-b.cat')
+      assert.match(mails[0].subject, /Compartit amb tu$/)
+      assert.match(mails[0].text, /Admin ha compartit amb tu el tiquet/)
+
+      // Others still can't see it; the author and admins see who it's shared with.
+      assert.strictEqual((await call(pere, `/issues/${id}`)).status, 404)
+      assert.ok(!(await (await call(pere, '/issues')).json()).issues.some((i) => i.id === id))
+      assert.deepStrictEqual((await (await call(anna, `/issues/${id}`)).json()).issue.sharedWith, ['joan@coop-b.cat'])
+
+      // Joan comes in from ESSTRAPIS and finds it: can read, download and add information, not change it.
+      const res = await fetch(`${base}/sso?token=${sso.createToken({ secret: process.env.TICKETS_SSO_KEY, tenant: 'coop-b', tenantName: 'Coop B', email: 'joan@coop-b.cat', name: 'Joan' })}`, { redirect: 'manual' })
+      const joan = res.headers.get('set-cookie').split(';')[0]
+      const listed = (await (await call(joan, '/issues')).json()).issues.find((i) => i.id === id)
+      assert.strictEqual(listed.shared, true)
+      assert.strictEqual(listed.sharedWith, undefined)
+      const { issue } = await (await call(joan, `/issues/${id}`)).json()
+      assert.strictEqual(issue.canEdit, false)
+      assert.strictEqual(issue.canReply, true)
+      assert.strictEqual(issue.sharedWith, undefined)
+      assert.strictEqual(await (await call(joan, `/issues/${id}/files/${issue.attachments[0].file}`)).text(), 'SHARED')
+      assert.strictEqual((await call(joan, `/issues/${id}`, { method: 'PATCH', json: { status: 'done' } })).status, 403)
+      assert.strictEqual((await call(joan, `/issues/${id}`, { method: 'PATCH', json: { public: true } })).status, 403)
+      assert.strictEqual((await call(joan, `/issues/${id}`, { method: 'PATCH', json: { sharedWith: [] } })).status, 403)
+      assert.strictEqual((await call(joan, '/users')).status, 403)
+      aiReply = JSON.stringify({ title: 'Only for some', type: 'bug', description: 'Private, also here.', acceptance_criteria: ['x'] })
+      assert.strictEqual((await call(joan, `/issues/${id}/messages`, { method: 'POST', body: newIssueForm('A mi també em passa') })).status, 201)
+      assert.match(fs.readFileSync(file, 'utf8'), /Joan \(joan@coop-b.cat\):\*\*\n> A mi també em passa/)
+
+      // Shared people are emailed like the author: a status change reaches Anna's admins and Joan.
+      sent.splice(0)
+      await call(admin, `/issues/${id}`, { method: 'PATCH', json: { status: 'in-progress' } })
+      assert.ok((await waitFor(1)).some((m) => m.to === 'joan@coop-b.cat'))
+
+      // Admins get the users with an email for the picker.
+      const { users: known } = await (await call(admin, '/users')).json()
+      assert.ok(known.some((u) => u.username === 'joan@coop-b.cat' && u.name === 'Joan'))
+      assert.ok(!known.some((u) => u.username === 'pere'))
+
+      // Unshared: Joan loses access.
+      assert.strictEqual((await call(admin, `/issues/${id}`, { method: 'PATCH', json: { sharedWith: [] } })).status, 200)
+      assert.strictEqual((await call(joan, `/issues/${id}`)).status, 404)
+      assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /shared_with/)
+      assert.match(fs.readFileSync(file, 'utf8'), /— unshared with joan@coop-b.cat \(admin\)\n$/)
+
+      // Through the team's API: shared_with travels in the file, and a file without it keeps the stored list.
+      const v1 = (method, json) => fetch(`${base}/api/v1/issues/${id}`, { method, headers: { Authorization: `Bearer ${process.env.TICKETS_API_KEY}`, ...(json ? { 'Content-Type': 'application/json' } : {}) }, body: json && JSON.stringify(json) })
+      const withShare = fs.readFileSync(file, 'utf8').replace('\npublic: false\n', '\npublic: false\nshared_with: [Joan@coop-b.cat]\n')
+      assert.strictEqual((await v1('PUT', { markdown: withShare })).status, 200)
+      assert.strictEqual((await call(joan, `/issues/${id}`)).status, 200)
+      const without = fs.readFileSync(file, 'utf8').replace(/shared_with:\n  - joan@coop-b.cat\n/, '').replace('Private', 'Private!')
+      assert.strictEqual((await v1('PUT', { markdown: without })).status, 200)
+      assert.match(fs.readFileSync(file, 'utf8'), /shared_with:\n  - joan@coop-b.cat\n/)
+      assert.strictEqual((await v1('PUT', { markdown: without.replace('\npublic: false\n', '\npublic: false\nshared_with: [nope]\n') })).status, 400)
+    } finally {
+      mailer.setTransport(null)
+    }
+  })
+
   test('tickets are shown in Catalan while the file stays in English', async () => {
     translate = (issue) => ({
       title: `Exporta ${issue.title}`,

@@ -84,7 +84,16 @@
         <label class="check"><input type="checkbox" id="public"> Públic</label>
         <span class="muted" id="status-msg"></span>
       </div>
-      <p class="muted readonly-note" hidden>Tiquet públic: només l'autor o un administrador el poden modificar.</p>
+      <div class="share-row" id="share" hidden>
+        <span class="share-label">Compartit amb</span>
+        <ul class="share-list"></ul>
+        <form class="share-add" id="share-form" hidden>
+          <input type="email" name="email" list="share-users" placeholder="correu@cooperativa.cat" autocomplete="off" required>
+          <datalist id="share-users"></datalist>
+          <button type="submit">Comparteix</button>
+        </form>
+      </div>
+      <p class="muted readonly-note" hidden></p>
       <p class="muted original-toggle" hidden><button type="button" class="link" id="show-original">Mostra l'original en anglès</button></p>
       <p class="muted translating" hidden><span class="spinner"></span>Traduint el tiquet al català…</p>
       <article id="body" class="md"></article>

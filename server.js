@@ -258,15 +258,25 @@ app.use('/api', (req, res, next) => { res.setHeader('Cache-Control', 'no-store')
 const requireUser = (req, res, next) => (req.user ? next() : res.status(401).json({ error: 'Not logged in' }))
 const isAdmin = (user) => user.role === 'admin'
 // Public tickets can be read by every user; only the author or an admin can change one.
+// The people a ticket is shared with can read it and add information, not change it.
 const canEdit = (user, issue) => isAdmin(user) || issue.author === user.username
-const canSee = (user, issue) => canEdit(user, issue) || issue.public === true
+const isSharedWith = (user, issue) => (issue.sharedWith || []).includes(user.username)
+const canReply = (user, issue) => canEdit(user, issue) || isSharedWith(user, issue)
+const canSee = (user, issue) => canReply(user, issue) || issue.public === true
 
 // Who changes tickets through /api/v1 (in emails, and as the author of the team's own issues).
 const API_ACTOR = { username: 'api', name: 'Equip ESSTRAPIS' }
 
-function withAuthorName(issue) {
+// Who it's shared with is only shown to the author and admins; others just see that it is.
+function forViewer(user, issue) {
   const author = users.find(issue.author)
-  return { ...issue, authorName: author ? author.name : issue.author || API_ACTOR.name }
+  const { sharedWith, ...rest } = issue
+  return {
+    ...rest,
+    authorName: author ? author.name : issue.author || API_ACTOR.name,
+    shared: sharedWith.length > 0,
+    ...(canEdit(user, issue) ? { sharedWith } : {}),
+  }
 }
 
 app.post('/api/login', (req, res) => {
@@ -320,8 +330,15 @@ app.get('/api/me', requireUser, (req, res) => {
   res.json({ user: users.publicUser(req.user), statuses: issues.STATUSES, closed: issues.CLOSED, upload: { ...config.upload, extensions: Object.keys(ALLOWED_UPLOADS) } })
 })
 
+// For the admins' share picker: users with an email address, enabled.
+app.get('/api/users', requireUser, (req, res) => {
+  if (!isAdmin(req.user)) return res.status(403).json({ error: 'Admins only' })
+  const list = users.load().filter((u) => !u.disabled && users.isEmail(u.username)).map((u) => ({ username: u.username, name: u.name }))
+  res.json({ users: list.sort((a, b) => a.name.localeCompare(b.name, 'ca')) })
+})
+
 app.get('/api/issues', requireUser, (req, res) => {
-  const list = issues.list().filter((i) => canSee(req.user, i)).map((i) => ({ ...withAuthorName(i), title: translations.title(i) }))
+  const list = issues.list().filter((i) => canSee(req.user, i)).map((i) => ({ ...forViewer(req.user, i), title: translations.title(i) }))
   res.json({ issues: list })
 })
 
@@ -335,9 +352,10 @@ app.get('/api/issues/:id', requireUser, async (req, res) => {
   const { body, ...rest } = issue
   res.json({
     issue: {
-      ...withAuthorName(rest),
+      ...forViewer(req.user, rest),
       title: ca.title,
       canEdit: canEdit(req.user, issue),
+      canReply: canReply(req.user, issue),
       html: markdown.parse(inlineAttachments(issue, ca.body)),
       translated: ca.translated,
       translating: Boolean(ca.pending),
@@ -400,7 +418,7 @@ app.post('/api/issues/:id/messages', requireUser, creationAllowed, upload.array(
   try {
     const issue = issues.get(req.params.id)
     if (!issue || !canSee(req.user, issue)) return res.status(404).json({ error: 'Not found' })
-    if (!canEdit(req.user, issue)) return res.status(403).json({ error: 'Only the author or an admin can change this ticket' })
+    if (!canReply(req.user, issue)) return res.status(403).json({ error: 'Only the author or an admin can change this ticket' })
     const text = readText(req)
     const current = `Type: ${issue.type} · Priority: ${issue.priority} · Project: ${issue.project || '-'}\n\n${issue.body}`
     const { draft, reply } = await ai.reviseIssue(current, text, files)
@@ -418,11 +436,17 @@ app.patch('/api/issues/:id', requireUser, async (req, res) => {
   const issue = issues.get(req.params.id)
   if (!issue || !canSee(req.user, issue)) return res.status(404).json({ error: 'Not found' })
   if (!canEdit(req.user, issue)) return res.status(403).json({ error: 'Only the author or an admin can change this ticket' })
-  const { status, public: isPublic } = req.body || {}
+  const { status, public: isPublic, sharedWith } = req.body || {}
   if (status !== undefined && !issues.STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid status' })
   if (isPublic !== undefined && typeof isPublic !== 'boolean') return res.status(400).json({ error: 'Invalid visibility' })
-  if (status === undefined && isPublic === undefined) return res.status(400).json({ error: 'Nothing to change' })
-  const updated = await issues.update(issue.id, { status, public: isPublic }, req.user)
+  if (sharedWith !== undefined && !isAdmin(req.user)) return res.status(403).json({ error: 'Only an admin can share this ticket' })
+  if (status === undefined && isPublic === undefined && sharedWith === undefined) return res.status(400).json({ error: 'Nothing to change' })
+  let updated
+  try {
+    updated = await issues.update(issue.id, { status, public: isPublic, sharedWith }, req.user)
+  } catch (err) {
+    return res.status(400).json({ error: err.message })
+  }
   res.json({ ok: true })
   mailer.changed(inCatalan(issue, translations.cached(issue)), inCatalan(updated, translations.cached(updated)), req.user)
 })

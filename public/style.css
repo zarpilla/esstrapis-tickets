@@ -47,8 +47,10 @@ h1 { font-size: 1.35rem; } h2 { font-size: 1.1rem; }
 .brand .logo { display: block; height: 22px; width: auto; flex: none; }
 .brand span { font-size: 13px; font-weight: 800; letter-spacing: .08em; color: var(--muted); padding-left: 10px; border-left: 1px solid var(--border); line-height: 18px; white-space: nowrap; }
 .top-actions { display: flex; gap: 1rem; align-items: center; }
+.topbar { gap: .8rem; }
+@media (max-width: 560px) { .brand span { display: none; } .top-actions { gap: .6rem; } }
 #whoami { display: flex; gap: .8rem; align-items: center; font-size: .9rem; }
-.theme-toggle { background: none; color: var(--text); border: 1px solid var(--border); border-radius: 99px; padding: .2rem .7rem; font-weight: 500; font-size: .85rem; }
+.theme-toggle { background: none; color: var(--text); border: 1px solid var(--border); border-radius: 99px; padding: .2rem .7rem; font-weight: 500; font-size: .85rem; white-space: nowrap; }
 
 main { max-width: 980px; margin: 0 auto; padding: 16px; }
 .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 1.2rem; margin-bottom: 16px; }
@@ -73,6 +75,15 @@ label.check { display: inline-flex; gap: .4rem; align-items: center; font-weight
 label.check input { margin: 0; accent-color: var(--accent); }
 .status-row label.check { margin: 0; }
 .badge.public { margin-left: .4rem; background: var(--todo); color: var(--todo-t); font-size: .75rem; }
+.badge.shared { margin-left: .4rem; background: var(--review); color: var(--review-t); font-size: .75rem; }
+.share-row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; padding: .8rem 0; border-bottom: 1px solid var(--border); }
+.share-label { font-weight: 600; }
+.share-list { display: flex; flex-wrap: wrap; gap: .4rem; list-style: none; margin: 0; padding: 0; }
+.chip { display: inline-flex; align-items: center; gap: .3rem; padding: .1rem .3rem .1rem .6rem; border: 1px solid var(--border); border-radius: 99px; font-size: .85rem; }
+.chip-remove { background: none; border: 0; padding: 0 .3rem; color: var(--muted); font-size: 1rem; line-height: 1; cursor: pointer; }
+.chip-remove:hover { color: var(--text); }
+.share-add { display: flex; gap: .4rem; margin: 0; flex: 1 1 260px; }
+.share-add input { flex: 1; min-width: 0; margin: 0; }
 .readonly-note { font-size: .9rem; margin: .6rem 0 0; }
 select:disabled { opacity: .75; }
 .ai-reply { background: var(--review); color: var(--review-t); border-radius: 8px; padding: .7rem .9rem; white-space: pre-wrap; }

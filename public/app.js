@@ -98,7 +98,9 @@ async function renderHome() {
     const shown = issues.filter((i) => f === 'all' || (f.startsWith('status:') ? i.status === f.slice(7) : (f === 'closed') === isClosed(i)))
     document.getElementById('list').replaceChildren(...shown.map((i) => el('tr', {},
       el('td', {}, i.id),
-      el('td', {}, el('a', { href: `#/issue/${i.id}` }, i.title || '(sense títol)'), i.public ? el('span', { class: 'badge public', title: 'Visible per a tots els usuaris' }, 'Públic') : null),
+      el('td', {}, el('a', { href: `#/issue/${i.id}` }, i.title || '(sense títol)'),
+        i.public ? el('span', { class: 'badge public', title: 'Visible per a tots els usuaris' }, 'Públic') : null,
+        i.shared ? el('span', { class: 'badge shared', title: i.sharedWith ? `Compartit amb ${i.sharedWith.join(', ')}` : 'Compartit amb tu' }, 'Compartit') : null),
       el('td', {}, badge('t', i.type)),
       el('td', {}, el('span', { class: `status s-${i.status}` }, label(i.status))),
       el('td', {}, badge('p', i.priority)),
@@ -172,13 +174,19 @@ async function renderIssue(id, aiReply) {
   select.addEventListener('change', () => save({ status: select.value }))
   publicBox.addEventListener('change', () => save({ public: publicBox.checked }))
 
-  // Public tickets of other users are read-only.
+  // Public tickets of other users are read-only; shared ones can only get more information.
   if (!issue.canEdit) {
     select.disabled = true
     publicBox.disabled = true
-    view.querySelector('.readonly-note').hidden = false
-    document.getElementById('followup').remove()
+    const note = view.querySelector('.readonly-note')
+    note.hidden = false
+    note.textContent = issue.canReply
+      ? "Tiquet compartit amb tu: hi pots afegir informació. Només l'autor o un administrador en poden canviar l'estat."
+      : "Tiquet públic: només l'autor o un administrador el poden modificar."
   }
+  if (!issue.canReply) document.getElementById('followup').remove()
+
+  drawSharing(issue, save)
 
   const replyBox = view.querySelector('.ai-reply')
   if (aiReply) {
@@ -217,6 +225,33 @@ async function renderIssue(id, aiReply) {
       )
     }))
   }
+}
+
+// Who the ticket is shared with: admins add and remove people, the author just sees them.
+function drawSharing(issue, save) {
+  const isAdmin = session.user.role === 'admin'
+  const list = issue.sharedWith || []
+  if (!isAdmin && !list.length) return
+  const box = document.getElementById('share')
+  box.hidden = false
+  box.querySelector('.share-list').replaceChildren(...(list.length ? list.map((email) => el('li', { class: 'chip' }, email,
+    isAdmin ? el('button', { type: 'button', class: 'chip-remove', title: `Deixa de compartir amb ${email}`, 'aria-label': `Treu ${email}`, 'data-email': email }, '×') : null,
+  )) : [el('li', { class: 'muted' }, 'ningú')]))
+  if (!isAdmin) return
+
+  box.querySelectorAll('.chip-remove').forEach((b) => b.addEventListener('click', () => save({ sharedWith: list.filter((e) => e !== b.dataset.email) })))
+  const form = document.getElementById('share-form')
+  form.hidden = false
+  form.addEventListener('submit', (e) => {
+    e.preventDefault()
+    const email = form.email.value.trim().toLowerCase()
+    if (email && !list.includes(email)) save({ sharedWith: [...list, email] })
+  })
+  api('/users').then(({ users }) => {
+    document.getElementById('share-users').replaceChildren(...users
+      .filter((u) => u.username !== issue.author && !list.includes(u.username))
+      .map((u) => el('option', { value: u.username }, u.name)))
+  }).catch(() => {})
 }
 
 // --- Router --------------------------------------------------------------------
