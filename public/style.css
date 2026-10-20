@@ -57,6 +57,7 @@ main { max-width: 980px; margin: 0 auto; padding: 16px; }
 .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 1.2rem; margin-bottom: 16px; }
 .narrow { max-width: 380px; margin: 3rem auto; }
 .muted { color: var(--muted); }
+.count { font-size: .8em; font-weight: normal; }
 .error { color: var(--error); }
 .row { display: flex; gap: .8rem; align-items: center; justify-content: space-between; flex-wrap: wrap; }
 .nowrap { white-space: nowrap; }

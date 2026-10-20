@@ -120,6 +120,7 @@ async function renderHome() {
       el('td', { class: 'nowrap' }, i.updated || ''),
     )))
     document.getElementById('empty').hidden = shown.length > 0
+    document.getElementById('count').textContent = shown.length === issues.length ? `(${shown.length})` : `(${shown.length} de ${issues.length})`
   }
   for (const [select] of filters) select.addEventListener('change', draw)
   draw()
