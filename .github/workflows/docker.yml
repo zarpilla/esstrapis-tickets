@@ -59,6 +59,8 @@ jobs:
         with:
           context: .
           platforms: linux/amd64
+          # Always fetch the newest node:24-alpine so Node security fixes land on rebuild.
+          pull: true
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
