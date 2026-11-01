@@ -2,6 +2,7 @@
 // ESSTRAPIS instances (tenants) that sign users in through /sso. They register
 // themselves on first login; use this to list or block them.
 //   npm run tenant -- list
+//   npm run tenant -- key <tenant>   prints that instance's own SSO key (issues/404)
 //   npm run tenant -- disable|enable <tenant or "instance name">
 //   npm run tenant -- token <tenant or "instance name"> <email> ["<Full name>"] [ttlSeconds]   prints a test login URL
 const config = require('../lib/config')
@@ -16,6 +17,13 @@ function main() {
         console.log(`${t.tenant.padEnd(32)} ${t.disabled ? 'disabled' : 'active  '} ${(t.lastLogin || '-').slice(0, 10)}  ${t.name}`)
       }
       break
+    case 'key': {
+      // the instance's own TICKETS_SSO_KEY (issues/404): put it in that instance's env
+      if (!config.ssoKey) throw new Error('TICKETS_SSO_KEY is not set')
+      if (!sso.TENANT_RE.test(tenant || '')) throw new Error('Usage: key <tenant slug>  (as in "list")')
+      console.log(sso.tenantSecret(config.ssoKey, tenant))
+      break
+    }
     case 'disable':
     case 'enable': {
       const t = tenants.setDisabled(tenant, cmd === 'disable')

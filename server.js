@@ -314,7 +314,7 @@ app.get('/sso', (req, res) => {
   let payload
   let user
   try {
-    payload = sso.readToken({ secret: config.ssoKey, token: req.query.token })
+    payload = sso.readInstanceToken({ master: config.ssoKey, token: req.query.token, sharedKeyAllowed: config.ssoSharedKeyAllowed })
     if (!sso.consumeNonce(payload.nonce, payload.exp)) throw new Error('token already used')
     if (!tenants.seen(payload.tenant, payload.tenantName)) throw new Error(`tenant ${payload.tenant} is disabled`)
     user = users.ssoLogin({ email: payload.email, name: payload.name, tenant: payload.tenant })
