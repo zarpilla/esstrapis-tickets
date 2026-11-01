@@ -259,8 +259,13 @@ const requireUser = (req, res, next) => (req.user ? next() : res.status(401).jso
 const isAdmin = (user) => user.role === 'admin'
 // Public tickets can be read by every user; only the author or an admin can change one.
 // The people a ticket is shared with can read it and add information, not change it.
-const canEdit = (user, issue) => isAdmin(user) || issue.author === user.username
-const isSharedWith = (user, issue) => (issue.sharedWith || []).includes(user.username)
+// The identity is the e-mail, and an instance's admin sets her users' e-mails
+// freely: a session from instance A only reaches the tickets of A (or without
+// an instance), so A can't read B's tickets through a user with the e-mail of
+// someone of B (issues/402).
+const sameTenant = (user, issue) => !user.tenant || !issue.tenant || issue.tenant === user.tenant
+const canEdit = (user, issue) => isAdmin(user) || (issue.author === user.username && sameTenant(user, issue))
+const isSharedWith = (user, issue) => (issue.sharedWith || []).includes(user.username) && sameTenant(user, issue)
 const canReply = (user, issue) => canEdit(user, issue) || isSharedWith(user, issue)
 const canSee = (user, issue) => canReply(user, issue) || issue.public === true
 
@@ -316,7 +321,7 @@ app.get('/sso', (req, res) => {
   } catch (err) {
     return fail(err.message)
   }
-  setSession(res, user)
+  setSession(res, user, payload.tenant)
   // Redirect so the token leaves the address bar and history.
   res.redirect(303, '/#/')
 })

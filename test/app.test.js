@@ -535,6 +535,17 @@ describe('tickets app', () => {
     assert.strictEqual(fromB.status, 303)
     assert.strictEqual(require('../lib/users').find('nuria@coop-a.cat').tenant, 'coop-b')
 
+    // issues/402: the identity is the e-mail, which an instance's admin sets
+    // freely. A session from coop-b doesn't reach the tickets filed from coop-a
+    // (an admin of coop-b could make a user with Núria's e-mail); the coop-a
+    // session still does, and each session files tickets for its own instance.
+    const cookieB = fromB.headers.get('set-cookie').split(';')[0]
+    assert.strictEqual((await call(cookieB, `/issues/${id}`)).status, 404)
+    assert.ok(!(await (await call(cookieB, '/issues')).json()).issues.some((i) => i.id === id))
+    assert.strictEqual((await call(cookie, `/issues/${id}`)).status, 200)
+    assert.strictEqual((await (await call(cookieB, '/me')).json()).user.tenant, 'coop-b')
+    assert.strictEqual((await (await call(cookie, '/me')).json()).user.tenant, 'coop-a')
+
     // A disabled tenant can't sign anyone in; re-enabled, it can.
     tenants.setDisabled('Coop A', true)
     assert.strictEqual((await ssoGet(tokenFor('nuria@coop-a.cat'))).status, 401)
